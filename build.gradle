@@ -1,0 +1,115 @@
+// Scapestack RuneLite plugin — Gradle build.
+//
+// Build:   ./gradlew build
+// Dev run: ./gradlew runClient   (launches RuneLite with this plugin loaded)
+//
+// Requires:
+//   - JDK 11+ (RuneLite's baseline)
+//   - Local Gradle (or use the wrapper if/when we add one)
+//
+// First-time setup: run `gradle wrapper` once, then everything via
+// `./gradlew`. The wrapper isn't committed yet because some IDE
+// integrations regen it differently per machine.
+
+plugins {
+    id 'java'
+}
+
+repositories {
+    mavenLocal()
+    mavenCentral()
+    maven {
+        url = 'https://repo.runelite.net'
+    }
+}
+
+def runeLiteVersion = 'latest.release'
+
+// 'runClient' needs the RuneLite client + its transitive deps on a
+// real (non-test) runtime classpath. The main compileOnly dep keeps
+// the jar slim; we add a separate config for the launcher.
+configurations {
+    runClient
+}
+
+dependencies {
+    compileOnly group: 'net.runelite', name: 'client', version: runeLiteVersion
+
+    compileOnly 'org.projectlombok:lombok:1.18.34'
+    annotationProcessor 'org.projectlombok:lombok:1.18.34'
+
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation group: 'net.runelite', name: 'client', version: runeLiteVersion
+    testImplementation group: 'net.runelite', name: 'jshell', version: runeLiteVersion
+    // E2E smoke-test uses JDBC to reset claim rows before assertions
+    // (skipped automatically when DATABASE_URL isn't set).
+    testImplementation 'org.postgresql:postgresql:42.7.4'
+
+    runClient group: 'net.runelite', name: 'client', version: runeLiteVersion
+    runClient group: 'net.runelite', name: 'jshell',  version: runeLiteVersion
+}
+
+group = 'app.scapestack.runelite'
+version = '0.1.0'
+sourceCompatibility = '11'
+
+tasks.withType(JavaCompile) {
+    options.encoding = 'UTF-8'
+}
+
+// Bundle runelite-plugin.properties in de jar — RuneLite's
+// sideloaded-plugins loader vereist deze manifest om de plugin-class
+// te identificeren. Zonder dit verschijnt de plugin niet onder
+// Configuration → Plugins in een live RuneLite sessie.
+jar {
+    from(projectDir) {
+        include 'runelite-plugin.properties'
+    }
+}
+
+// Launches RuneLite met deze plugin side-loaded. Gebruik:
+//   JAVA_HOME=~/jdk-11/jdk-11.0.31+11/Contents/Home ./gradlew runClient
+//
+// We starten via DevLauncher (eigen main) ipv RuneLite direct, want
+// die roept ExternalPluginManager.loadBuiltin(ScapestackSyncPlugin)
+// aan vóór RuneLite.main — pas dan verschijnt onze plugin in de
+// Configuration → Plugins lijst. De oude --developer-mode CLI flag
+// is in recente RuneLite-versies een no-op zonder safe-mode lijst.
+task runClient(type: JavaExec) {
+    group = 'application'
+    description = 'Start RuneLite met de Scapestack-plugin side-loaded via DevLauncher'
+    dependsOn 'classes'
+    classpath = configurations.runClient + sourceSets.main.runtimeClasspath
+    mainClass = 'app.scapestack.runelite.DevLauncher'
+    args = ['--debug']
+    // ExternalPluginManager.loadBuiltin verifieert dat -ea aan staat:
+    // pakt API-misbruik tijdens dev vroeger.
+    jvmArgs '-ea'
+    systemProperty 'runelite.pluginhub.version', project.version
+}
+
+test {
+    useJUnit()
+    // Pass DATABASE_URL through to JVM so EndToEndSmokeTest can reset
+    // claim rows before assertions. Tries .env.local first, then env.
+    def dbUrl = System.getenv('DATABASE_URL')
+    if (!dbUrl && file('../.env.local').exists()) {
+        def line = file('../.env.local').readLines()
+            .find { it.startsWith('DATABASE_URL=') }
+        if (line) dbUrl = line.substring('DATABASE_URL='.length()).trim()
+    }
+    if (dbUrl) systemProperty 'DATABASE_URL', dbUrl
+
+    // E2E hits a live server — gradle has no way to know if that server's
+    // state changed, so up-to-date caching gives false-silent runs.
+    // Always rerun. Pure-unit suites are fast enough that we don't care.
+    outputs.upToDateWhen { false }
+
+    // Per-test PASS/FAIL/SKIP visibility — without this you only see the
+    // summary "BUILD SUCCESSFUL" which hides what actually ran.
+    testLogging {
+        events 'passed', 'skipped', 'failed'
+        showStandardStreams = false
+        exceptionFormat = 'short'
+    }
+}
