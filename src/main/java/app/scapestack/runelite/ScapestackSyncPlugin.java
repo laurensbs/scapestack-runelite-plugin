@@ -61,19 +61,27 @@ public class ScapestackSyncPlugin extends Plugin {
     @Inject private CollectionLogReader collectionLogReader;
     @Inject private ConfigManager configManager;
 
+    // Shared resources — RuneLite Plugin Hub policy: never construct
+    // your own OkHttpClient/Gson, always reuse the injected one. Keeps
+    // connection pools + trust-store consistent across plugins.
+    @Inject private OkHttpClient http;
+    @Inject private Gson gson;
+
     // OSRS collection-log widget group ID. Documented on the RuneLite
     // WidgetID enum; pinning the constant here to keep this file
     // dependency-light for the unit tests.
     private static final int COLLECTION_LOG_GROUP_ID = 621;
 
-    private final OkHttpClient http = new OkHttpClient();
-    private final ClaimClient claimClient = new ClaimClient(http);
+    private ClaimClient claimClient;
     private static final MediaType JSON = MediaType.parse("application/json");
     private static final String PLUGIN_VERSION = "0.1.0";
     private static final String USER_AGENT = "scapestack-plugin/" + PLUGIN_VERSION;
 
     @Override
     protected void startUp() {
+        // Wire up the claim-helper here (rather than as a final field)
+        // because Guice fills @Inject fields after construction.
+        claimClient = new ClaimClient(http);
         log.info("Scapestack Sync started");
     }
 
@@ -150,7 +158,6 @@ public class ScapestackSyncPlugin extends Plugin {
             return;
         }
 
-        Gson gson = new Gson();
         JsonObject body = new JsonObject();
         body.addProperty("rsn", rsn);
         body.addProperty("displayName", rsn);
