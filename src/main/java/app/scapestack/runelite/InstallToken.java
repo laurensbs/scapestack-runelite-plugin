@@ -10,8 +10,9 @@ import java.util.UUID;
  * Lifecycle:
  *   1. First plugin run: generate a UUID, persist via ConfigManager under
  *      ("scapestackSync", "installToken").
- *   2. Plugin's first sync POSTs {rsn, token} to /api/sync/claim. The
- *      server stores sha256(token) keyed by RSN, first-write-wins.
+ *   2. Plugin's first sync POSTs {rsn} plus Authorization: Bearer <token>
+ *      to /api/sync/claim. The server stores sha256(token) keyed by RSN,
+ *      first-write-wins.
  *   3. Every subsequent /api/sync POST carries Authorization: Bearer <token>.
  *      Server rejects when the hash doesn't match the bound claim.
  *
@@ -56,6 +57,7 @@ public final class InstallToken {
     public static String getOrCreate(ConfigManager cm)          { return getOrCreate(wrap(cm)); }
     public static String claimedRsn(ConfigManager cm)           { return claimedRsn(wrap(cm)); }
     public static void rememberClaimedRsn(ConfigManager cm, String rsn) { rememberClaimedRsn(wrap(cm), rsn); }
+    public static void forgetClaim(ConfigManager cm)            { forgetClaim(wrap(cm)); }
 
     // ---------- test-facing overloads ----------
 
@@ -76,5 +78,9 @@ public final class InstallToken {
 
     public static void rememberClaimedRsn(KeyValueStore store, String rsn) {
         store.set(KEY_CLAIMED, rsn);
+    }
+
+    public static void forgetClaim(KeyValueStore store) {
+        store.set(KEY_CLAIMED, "");
     }
 }

@@ -37,6 +37,26 @@ public class GameStateReader {
         public List<String> questsCompleted = new ArrayList<>();
         public List<DiaryCompletion> diariesCompleted = new ArrayList<>();
         public List<Integer> collectionLogItemIds = new ArrayList<>();
+        public SlayerState slayer = null;
+    }
+
+    /** Slayer-state read uit VarPlayers. Null wanneer geen sessie of
+     *  varp-leesfout — server-side leeg veld = "geen plugin slayer data". */
+    public static class SlayerState {
+        public final int points;             // varp 1170
+        public final int streak;             // varp 1602
+        public final int taskRemaining;      // varp 395  (huidige task quantity remaining)
+        public final int currentTaskId;      // varp 394  (welke monster is current task)
+        /** Block-slot task-IDs uit varps 1306..1311. 0 = leeg slot.
+         *  Server-side mappen we naar monster.id via een task-id tabel. */
+        public final List<Integer> blocks;
+        public SlayerState(int points, int streak, int taskRemaining, int currentTaskId, List<Integer> blocks) {
+            this.points = points;
+            this.streak = streak;
+            this.taskRemaining = taskRemaining;
+            this.currentTaskId = currentTaskId;
+            this.blocks = blocks;
+        }
     }
 
     public static class DiaryCompletion {
@@ -123,6 +143,37 @@ public class GameStateReader {
         s.questsCompleted = readQuests(client);
         s.diariesCompleted = readDiaries(client);
         s.collectionLogItemIds = collectionLogItemIds != null ? collectionLogItemIds : Collections.emptyList();
+        s.slayer = readSlayer(client);
         return s;
+    }
+
+    /** Slayer points + streak + current-task remaining + 6 block-slot
+     *  task-IDs vanuit VarPlayers. Varp-IDs gepind hier zodat de plugin
+     *  test-baar blijft zonder live client. Bron: OSRS Wiki VarPlayer
+     *  + Reward Shop pagina.
+     *
+     *  Block-slot varps: 1306..1311. Lege slot = 0. */
+    private static final int[] BLOCK_SLOT_VARPS = { 1306, 1307, 1308, 1309, 1310, 1311 };
+
+    private SlayerState readSlayer(Client client) {
+        try {
+            int points = client.getVarpValue(1170);
+            int streak = client.getVarpValue(1602);
+            int remaining = client.getVarpValue(395);
+            int taskId = client.getVarpValue(394);
+            ArrayList<Integer> blocks = new ArrayList<>(BLOCK_SLOT_VARPS.length);
+            for (int v : BLOCK_SLOT_VARPS) {
+                int id = client.getVarpValue(v);
+                if (id > 0) blocks.add(id);
+            }
+            // Geen sessie / niet ingelogd → alle vars 0. Treat als "no data."
+            if (points == 0 && streak == 0 && remaining == 0 && taskId == 0 && blocks.isEmpty()) {
+                return null;
+            }
+            return new SlayerState(points, streak, remaining, taskId, blocks);
+        } catch (Exception ex) {
+            log.debug("Slayer state read faalde — verm. geen sessie", ex);
+            return null;
+        }
     }
 }

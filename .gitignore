@@ -2,6 +2,9 @@
 .gradle/
 build/
 
+# Eclipse / VS Code Java output (default writes to bin/ ipv build/)
+bin/
+
 # IDE
 .idea/
 *.iml

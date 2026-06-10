@@ -9,6 +9,7 @@ import okhttp3.RequestBody;
 import okhttp3.Response;
 
 import java.io.IOException;
+import java.net.URI;
 
 /**
  * Thin client for POST /api/sync/claim.
@@ -41,20 +42,27 @@ public final class ClaimClient {
     public boolean claim(String claimUrl, String rsn, String token, String userAgent) {
         JsonObject body = new JsonObject();
         body.addProperty("rsn", rsn);
-        body.addProperty("token", token);
 
-        Request req = new Request.Builder()
-            .url(claimUrl)
-            .post(RequestBody.create(JSON, body.toString()))
-            .header("User-Agent", userAgent)
-            .build();
-
-        try (Response res = http.newCall(req).execute()) {
-            if (res.isSuccessful()) {
-                log.info("Scapestack claim ok for {}", rsn);
-                return true;
+        try {
+            Request req = new Request.Builder()
+                .url(claimUrl)
+                .post(RequestBody.create(JSON, body.toString()))
+                .header("User-Agent", userAgent)
+                .header("Authorization", "Bearer " + token)
+                .build();
+            try (Response res = http.newCall(req).execute()) {
+                String bodyText = ServerResponseSummary.readBody(res);
+                if (res.isSuccessful()) {
+                    log.info("Scapestack claim ok for {}", rsn);
+                    return true;
+                }
+                log.warn("Scapestack claim failed for {}: {}",
+                    rsn,
+                    ServerResponseSummary.logDetail(res.code(), bodyText));
+                return false;
             }
-            log.warn("Scapestack claim failed: HTTP {} for {}", res.code(), rsn);
+        } catch (IllegalArgumentException ex) {
+            log.warn("Scapestack claim URL is invalid: {}", claimUrl);
             return false;
         } catch (IOException ex) {
             log.warn("Scapestack claim request failed", ex);
@@ -63,15 +71,57 @@ public final class ClaimClient {
     }
 
     /**
+     * Normalizes a user-configured sync endpoint before OkHttp sees it.
+     * RuneLite config text fields are easy to paste with whitespace; query
+     * strings and fragments also break claim URL derivation because the claim
+     * route is path-based. Keep this conservative: trim, strip ?/# suffixes,
+     * collapse trailing slashes, and recover when a user pasted the derived
+     * /sync/claim endpoint instead of the base /sync endpoint.
+     */
+    public static String normalizeSyncUrl(String syncUrl) {
+        if (syncUrl == null) return "";
+        String clean = syncUrl.trim();
+        int query = clean.indexOf('?');
+        int fragment = clean.indexOf('#');
+        int cut = -1;
+        if (query >= 0) cut = query;
+        if (fragment >= 0 && (cut < 0 || fragment < cut)) cut = fragment;
+        if (cut >= 0) clean = clean.substring(0, cut);
+        while (clean.endsWith("/") && !clean.endsWith("://")) {
+            clean = clean.substring(0, clean.length() - 1);
+        }
+        if (clean.endsWith("/sync/claim")) {
+            clean = clean.substring(0, clean.length() - "/claim".length());
+        }
+        return clean;
+    }
+
+    /**
      * Derives the claim endpoint URL from the configured sync URL.
      * Public for the unit test.
      */
     public static String claimUrlFromSyncUrl(String syncUrl) {
-        if (syncUrl == null) return "";
-        if (syncUrl.endsWith("/sync")) return syncUrl + "/claim";
-        if (syncUrl.endsWith("/sync/")) return syncUrl + "claim";
-        // Fallback: append /claim. The plugin's default points at
-        // /api/sync so this branch is mostly defensive.
-        return syncUrl + (syncUrl.endsWith("/") ? "" : "/") + "claim";
+        String clean = normalizeSyncUrl(syncUrl);
+        if (clean.isEmpty()) return "";
+        if (clean.endsWith("/sync")) return clean + "/claim";
+        return clean + "/claim";
+    }
+
+    /**
+     * Returns true only for network endpoints OkHttp can POST to and the
+     * plugin can safely echo back as a browser handoff origin.
+     */
+    public static boolean isHttpSyncUrl(String syncUrl) {
+        String clean = normalizeSyncUrl(syncUrl);
+        if (clean.isEmpty()) return false;
+        try {
+            URI uri = URI.create(clean);
+            String scheme = uri.getScheme();
+            return ("https".equalsIgnoreCase(scheme) || "http".equalsIgnoreCase(scheme))
+                && uri.getHost() != null
+                && !uri.getHost().isBlank();
+        } catch (IllegalArgumentException ex) {
+            return false;
+        }
     }
 }

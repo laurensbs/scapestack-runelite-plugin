@@ -23,6 +23,7 @@ import java.sql.PreparedStatement;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.Assert.*;
 import static org.junit.Assume.assumeTrue;
@@ -60,7 +61,11 @@ public class EndToEndSmokeTest {
     private static final String TEST_TOKEN  = "e2e-test-token-aaaaaaaaaaaaaaaaaaaaa";
     private static final String OTHER_TOKEN = "e2e-other-token-bbbbbbbbbbbbbbbbbbbbb";
 
-    private static final OkHttpClient http = new OkHttpClient();
+    private static final OkHttpClient http = new OkHttpClient.Builder()
+        .connectTimeout(5, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .writeTimeout(10, TimeUnit.SECONDS)
+        .build();
     private static final MediaType JSON = MediaType.parse("application/json");
 
     @BeforeClass
@@ -126,8 +131,8 @@ public class EndToEndSmokeTest {
     @Test
     public void testA_firstClaimSucceeds() throws IOException {
         Result r = postJson(BASE + "/api/sync/claim",
-            "{\"rsn\":\"" + RSN + "\",\"token\":\"" + TEST_TOKEN + "\"}",
-            null);
+            "{\"rsn\":\"" + RSN + "\"}",
+            "Bearer " + TEST_TOKEN);
         // BeforeClass heeft de claim opgeruimd, dus dit is altijd eerste keer.
         assertEquals("Eerste claim moet 200 zijn. body=" + r.body, 200, r.status);
         assertTrue("body moet ok:true bevatten", r.body.contains("\"ok\":true"));
@@ -195,8 +200,8 @@ public class EndToEndSmokeTest {
     @Test
     public void testE_rivalClaimIs409() throws IOException {
         Result r = postJson(BASE + "/api/sync/claim",
-            "{\"rsn\":\"" + RSN + "\",\"token\":\"" + OTHER_TOKEN + "\"}",
-            null);
+            "{\"rsn\":\"" + RSN + "\"}",
+            "Bearer " + OTHER_TOKEN);
         assertEquals("Rival token op zelfde RSN → 409. body=" + r.body, 409, r.status);
     }
 
@@ -205,8 +210,8 @@ public class EndToEndSmokeTest {
     @Test
     public void testF_sameTokenReclaim() throws IOException {
         Result r = postJson(BASE + "/api/sync/claim",
-            "{\"rsn\":\"" + RSN + "\",\"token\":\"" + TEST_TOKEN + "\"}",
-            null);
+            "{\"rsn\":\"" + RSN + "\"}",
+            "Bearer " + TEST_TOKEN);
         assertEquals("Re-claim met zelfde token → 200. body=" + r.body, 200, r.status);
     }
 
@@ -242,6 +247,19 @@ public class EndToEndSmokeTest {
         assertNull("Vers, niets onthouden", InstallToken.claimedRsn(kv));
         InstallToken.rememberClaimedRsn(kv, "Lynx Titan");
         assertEquals("Lynx Titan", InstallToken.claimedRsn(kv));
+    }
+
+    @Test
+    public void testJ_forgetClaimKeepsInstallToken() {
+        Map<String, String> store = new HashMap<>();
+        InstallToken.KeyValueStore kv = mapStore(store);
+        String token = InstallToken.getOrCreate(kv);
+        InstallToken.rememberClaimedRsn(kv, "Lynx Titan");
+
+        InstallToken.forgetClaim(kv);
+
+        assertNull("Claim-cache is cleared", InstallToken.claimedRsn(kv));
+        assertEquals("Install token remains stable", token, InstallToken.getOrCreate(kv));
     }
 
     // ---------- helpers ----------
