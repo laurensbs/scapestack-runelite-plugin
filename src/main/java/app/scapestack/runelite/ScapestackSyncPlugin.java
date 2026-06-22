@@ -91,8 +91,7 @@ public class ScapestackSyncPlugin extends Plugin {
     private final SyncGate syncGate = new SyncGate();
     private boolean optInHintShown;
     private volatile boolean running;
-    private Thread syncThread;
-    private volatile Call syncCall;
+    private volatile Call activeCall;
     private static final MediaType JSON = MediaType.parse("application/json");
     private static final String PLUGIN_VERSION = "0.2.0";
     private static final String USER_AGENT = "scapestack-plugin/" + PLUGIN_VERSION;
@@ -111,11 +110,7 @@ public class ScapestackSyncPlugin extends Plugin {
     @Override
     protected void shutDown() {
         running = false;
-        cancelSyncCall(syncCall);
-        Thread thread = syncThread;
-        if (thread != null) {
-            thread.interrupt();
-        }
+        cancelSyncCall(activeCall);
         log.info("Scapestack Sync stopped");
     }
 
@@ -215,7 +210,7 @@ public class ScapestackSyncPlugin extends Plugin {
             return;
         }
         notifyChat("Scapestack sync started for " + rsn + "…");
-        syncThread = newSyncThread(() -> {
+        Thread thread = newSyncThread(() -> {
             try {
                 String syncUrl = ClaimClient.normalizeSyncUrl(config.syncUrl());
                 if (syncUrl.isBlank()) {
@@ -229,7 +224,9 @@ public class ScapestackSyncPlugin extends Plugin {
                     return;
                 }
 
-                SyncServiceReadiness.Result readiness = syncServiceReadiness.check(syncUrl, USER_AGENT);
+                if (!running) return;
+                SyncServiceReadiness.Result readiness = syncServiceReadiness.check(syncUrl, USER_AGENT, this::setActiveCall);
+                if (!running) return;
                 if (!readiness.proceed) {
                     log.warn("Scapestack sync service is not ready: {}", readiness.message);
                     notifyChat("Scapestack sync failed: " + readiness.message + ".");
@@ -249,7 +246,7 @@ public class ScapestackSyncPlugin extends Plugin {
                 // same token}, so re-running is cheap.
                 if (claimedRsn == null || !claimedRsn.equalsIgnoreCase(rsn)) {
                     String claimUrl = ClaimClient.claimUrlFromSyncUrl(syncUrl);
-                    if (claimClient.claim(claimUrl, rsn, token, USER_AGENT)) {
+                    if (claimClient.claim(claimUrl, rsn, token, USER_AGENT, this::setActiveCall)) {
                         InstallToken.rememberClaimedRsn(configManager, rsn);
                     } else {
                         // The sync POST below will likely fail with 403; log
@@ -259,6 +256,7 @@ public class ScapestackSyncPlugin extends Plugin {
                         log.warn("Claim did not succeed; attempting sync anyway");
                     }
                 }
+                if (!running) return;
 
                 Request req;
                 try {
@@ -275,42 +273,56 @@ public class ScapestackSyncPlugin extends Plugin {
                 }
 
                 Call call = http.newCall(req);
-                syncCall = call;
-                try (Response res = call.execute()) {
-                    String bodyText = ServerResponseSummary.readBody(res);
-                    if (res.isSuccessful()) {
-                        log.info("Synced to Scapestack: {} quests, {} diaries, {} CL items",
-                            snap.questsCompleted.size(),
-                            snap.diariesCompleted.size(),
-                            snap.collectionLogItemIds.size());
-                        notifyChat(buildSyncSuccessMessage(rsn, snap, syncUrl));
-                    } else if (res.code() == 401 || res.code() == 403) {
-                        // Local cache may be stale (token rotated, claim
-                        // wiped, RSN claimed elsewhere). Drop the claimedRsn
-                        // marker so the next sync attempts a fresh claim.
-                        String detail = ServerResponseSummary.failureDetail(res.code(), bodyText);
-                        log.warn("Sync rejected: {}. Will retry claim on next sync.",
-                            ServerResponseSummary.logDetail(res.code(), bodyText));
-                        InstallToken.forgetClaim(configManager);
-                        notifyChat("Scapestack sync rejected: " + detail + ". Sync again to retry claim.");
-                    } else {
-                        String detail = ServerResponseSummary.failureDetail(res.code(), bodyText);
-                        log.warn("Sync failed: {}", ServerResponseSummary.logDetail(res.code(), bodyText));
-                        notifyChat("Scapestack sync failed: " + detail + ".");
+                setActiveCall(call);
+                try {
+                    if (!running) return;
+                    try (Response res = call.execute()) {
+                        String bodyText = ServerResponseSummary.readBody(res);
+                        if (res.isSuccessful()) {
+                            log.info("Synced to Scapestack: {} quests, {} diaries, {} CL items",
+                                snap.questsCompleted.size(),
+                                snap.diariesCompleted.size(),
+                                snap.collectionLogItemIds.size());
+                            notifyChat(buildSyncSuccessMessage(rsn, snap, syncUrl));
+                        } else if (res.code() == 401 || res.code() == 403) {
+                            // Local cache may be stale (token rotated, claim
+                            // wiped, RSN claimed elsewhere). Drop the claimedRsn
+                            // marker so the next sync attempts a fresh claim.
+                            String detail = ServerResponseSummary.failureDetail(res.code(), bodyText);
+                            log.warn("Sync rejected: {}. Will retry claim on next sync.",
+                                ServerResponseSummary.logDetail(res.code(), bodyText));
+                            InstallToken.forgetClaim(configManager);
+                            notifyChat("Scapestack sync rejected: " + detail + ". Sync again to retry claim.");
+                        } else {
+                            String detail = ServerResponseSummary.failureDetail(res.code(), bodyText);
+                            log.warn("Sync failed: {}", ServerResponseSummary.logDetail(res.code(), bodyText));
+                            notifyChat("Scapestack sync failed: " + detail + ".");
+                        }
                     }
                 } catch (IOException ex) {
                     log.warn("Sync request failed", ex);
                     notifyChat("Scapestack sync failed: connection error.");
                 } finally {
-                    if (syncCall == call) {
-                        syncCall = null;
-                    }
+                    clearActiveCall(call);
                 }
             } finally {
                 syncGate.finish();
             }
         });
-        syncThread.start();
+        thread.start();
+    }
+
+    private void setActiveCall(Call call) {
+        activeCall = call;
+        if (call != null && !running) {
+            call.cancel();
+        }
+    }
+
+    private void clearActiveCall(Call call) {
+        if (activeCall == call) {
+            activeCall = null;
+        }
     }
 
     private void notifyChat(String message) {

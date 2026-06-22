@@ -3,6 +3,7 @@ package app.scapestack.runelite;
 import com.google.gson.JsonObject;
 import lombok.extern.slf4j.Slf4j;
 import okhttp3.MediaType;
+import okhttp3.Call;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
@@ -10,6 +11,7 @@ import okhttp3.Response;
 
 import java.io.IOException;
 import java.net.URI;
+import java.util.function.Consumer;
 
 /**
  * Thin client for POST /api/sync/claim.
@@ -40,6 +42,10 @@ public final class ClaimClient {
      * the trailing /sync with /sync/claim — keeps one config field.
      */
     public boolean claim(String claimUrl, String rsn, String token, String userAgent) {
+        return claim(claimUrl, rsn, token, userAgent, null);
+    }
+
+    boolean claim(String claimUrl, String rsn, String token, String userAgent, Consumer<Call> activeCall) {
         JsonObject body = new JsonObject();
         body.addProperty("rsn", rsn);
 
@@ -50,7 +56,9 @@ public final class ClaimClient {
                 .header("User-Agent", userAgent)
                 .header("Authorization", "Bearer " + token)
                 .build();
-            try (Response res = http.newCall(req).execute()) {
+            Call call = http.newCall(req);
+            updateActiveCall(activeCall, call);
+            try (Response res = call.execute()) {
                 String bodyText = ServerResponseSummary.readBody(res);
                 if (res.isSuccessful()) {
                     log.info("Scapestack claim ok for {}", rsn);
@@ -60,6 +68,8 @@ public final class ClaimClient {
                     rsn,
                     ServerResponseSummary.logDetail(res.code(), bodyText));
                 return false;
+            } finally {
+                updateActiveCall(activeCall, null);
             }
         } catch (IllegalArgumentException ex) {
             log.warn("Scapestack claim URL is invalid: {}", claimUrl);
@@ -67,6 +77,12 @@ public final class ClaimClient {
         } catch (IOException ex) {
             log.warn("Scapestack claim request failed", ex);
             return false;
+        }
+    }
+
+    private static void updateActiveCall(Consumer<Call> activeCall, Call call) {
+        if (activeCall != null) {
+            activeCall.accept(call);
         }
     }
 

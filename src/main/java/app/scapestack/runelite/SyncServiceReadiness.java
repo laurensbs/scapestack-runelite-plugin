@@ -4,11 +4,13 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import lombok.extern.slf4j.Slf4j;
+import okhttp3.Call;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
 
 import java.io.IOException;
+import java.util.function.Consumer;
 
 @Slf4j
 final class SyncServiceReadiness {
@@ -38,6 +40,10 @@ final class SyncServiceReadiness {
     }
 
     Result check(String syncUrl, String userAgent) {
+        return check(syncUrl, userAgent, null);
+    }
+
+    Result check(String syncUrl, String userAgent, Consumer<Call> activeCall) {
         Request request;
         try {
             request = new Request.Builder()
@@ -49,7 +55,9 @@ final class SyncServiceReadiness {
             return Result.stop("invalid Sync URL");
         }
 
-        try (Response response = http.newCall(request).execute()) {
+        Call call = http.newCall(request);
+        updateActiveCall(activeCall, call);
+        try (Response response = call.execute()) {
             String body = ServerResponseSummary.readBody(response);
             if (!response.isSuccessful()) {
                 log.debug("Scapestack readiness check returned {}", response.code());
@@ -59,6 +67,14 @@ final class SyncServiceReadiness {
         } catch (IOException ex) {
             log.debug("Scapestack readiness check failed", ex);
             return Result.proceed("readiness check unavailable");
+        } finally {
+            updateActiveCall(activeCall, null);
+        }
+    }
+
+    private static void updateActiveCall(Consumer<Call> activeCall, Call call) {
+        if (activeCall != null) {
+            activeCall.accept(call);
         }
     }
 

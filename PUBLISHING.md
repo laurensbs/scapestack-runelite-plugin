@@ -93,9 +93,9 @@ Once the standalone repo has a tagged release:
      `/next` URL with `source=plugin-sync&bank=none`; bank context is a
      separate browser-only paste and never flows through RuneLite.
    - **Long-running work on the client thread.** Our sync runs on a named
-     daemon background thread, and plugin shutdown interrupts that worker,
-     cancels the in-flight OkHttp sync call, and suppresses further chat
-     feedback. Verify before submitting.
+     daemon background thread, and plugin shutdown cancels the active OkHttp
+     call and suppresses further chat feedback while that worker returns
+     normally. Verify before submitting.
 5. Once merged, the plugin appears in the in-game Plugin Hub within
    ~30 min (CI rebuild cadence).
 
