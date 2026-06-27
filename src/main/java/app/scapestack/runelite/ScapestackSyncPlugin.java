@@ -83,8 +83,10 @@ public class ScapestackSyncPlugin extends Plugin {
     // dependency-light for the unit tests.
     private static final int COLLECTION_LOG_GROUP_ID = 621;
     private static final String CONFIG_GROUP = "scapestackSync";
+    private static final String KEY_SYNC_URL = "syncUrl";
     private static final String KEY_AUTO_SYNC = "autoSync";
     private static final String KEY_FORCE_CLAIM = "forceClaimOnNextSync";
+    private static final String DEFAULT_SYNC_URL = "https://www.scapestack.org/api/sync";
 
     private ClaimClient claimClient;
     private SyncServiceReadiness syncServiceReadiness;
@@ -104,6 +106,7 @@ public class ScapestackSyncPlugin extends Plugin {
         claimClient = new ClaimClient(http);
         syncServiceReadiness = new SyncServiceReadiness(http);
         running = true;
+        migrateLegacySyncUrl();
         log.info("Scapestack Sync started");
     }
 
@@ -325,6 +328,14 @@ public class ScapestackSyncPlugin extends Plugin {
         }
     }
 
+    private void migrateLegacySyncUrl() {
+        String migrated = migrateLegacySyncUrl(config.syncUrl());
+        if (migrated != null) {
+            configManager.setConfiguration(CONFIG_GROUP, KEY_SYNC_URL, migrated);
+            log.info("Migrated Scapestack sync endpoint to {}", migrated);
+        }
+    }
+
     private void notifyChat(String message) {
         if (!shouldQueueChat(config.chatFeedback(), running, message)) return;
         clientThread.invokeLater(() -> chatMessageManager.queue(QueuedMessage.builder()
@@ -405,6 +416,26 @@ public class ScapestackSyncPlugin extends Plugin {
         } catch (UnsupportedEncodingException ex) {
             return value.trim().replace(" ", "+");
         }
+    }
+
+    static String migrateLegacySyncUrl(String syncUrl) {
+        String clean = ClaimClient.normalizeSyncUrl(syncUrl);
+        if (clean.isBlank()) return null;
+
+        try {
+            URI uri = URI.create(clean);
+            String host = uri.getHost();
+            String path = uri.getPath();
+            if (host != null
+                && ("scapestack.app".equalsIgnoreCase(host) || "www.scapestack.app".equalsIgnoreCase(host))
+                && "/api/sync".equals(path)) {
+                return DEFAULT_SYNC_URL;
+            }
+        } catch (IllegalArgumentException ignored) {
+            return null;
+        }
+
+        return null;
     }
 
     static JsonObject buildSyncPayload(String rsn, GameStateReader.Snapshot snap, Gson gson) {

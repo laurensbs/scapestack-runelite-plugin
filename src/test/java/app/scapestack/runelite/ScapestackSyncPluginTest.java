@@ -163,6 +163,25 @@ public class ScapestackSyncPluginTest {
     }
 
     @Test
+    public void migratesLegacyScapestackAppEndpointToOrg() {
+        assertEquals(
+            "https://www.scapestack.org/api/sync",
+            ScapestackSyncPlugin.migrateLegacySyncUrl("https://scapestack.app/api/sync")
+        );
+        assertEquals(
+            "https://www.scapestack.org/api/sync",
+            ScapestackSyncPlugin.migrateLegacySyncUrl(" https://www.scapestack.app/api/sync/claim?debug=1 ")
+        );
+    }
+
+    @Test
+    public void leavesCurrentAndSelfHostedSyncEndpointsAlone() {
+        assertEquals(null, ScapestackSyncPlugin.migrateLegacySyncUrl("https://www.scapestack.org/api/sync"));
+        assertEquals(null, ScapestackSyncPlugin.migrateLegacySyncUrl("http://127.0.0.1:4173/api/sync"));
+        assertEquals(null, ScapestackSyncPlugin.migrateLegacySyncUrl("https://example.com/api/sync"));
+    }
+
+    @Test
     public void autoSyncConfigChangeTriggersImmediateFirstSyncOnlyWhenEnabled() {
         ConfigChanged enabled = configChange("scapestackSync", "autoSync", "true");
         ConfigChanged disabled = configChange("scapestackSync", "autoSync", "false");
