@@ -8,6 +8,15 @@ import net.runelite.client.config.ConfigItem;
 public interface ScapestackSyncConfig extends Config {
 
     @ConfigItem(
+        keyName = "syncNow",
+        name = "Sync now",
+        description = "Send a planner snapshot now. Resets automatically after the sync starts."
+    )
+    default boolean syncNow() {
+        return false;
+    }
+
+    @ConfigItem(
         keyName = "autoSync",
         name = "Sync on login",
         description = "Updates your Scapestack session planner with account type, quests, skills, diaries, collection-log IDs and Slayer state. Bank readiness stays separate."

@@ -278,6 +278,26 @@ public class ScapestackSyncPluginTest {
     }
 
     @Test
+    public void successMessageUsesServerAcceptedCountsWhenAvailable() {
+        GameStateReader.Snapshot snapshot = new GameStateReader.Snapshot();
+        snapshot.skills = Collections.singletonList(new GameStateReader.SkillLevel("Agility", 35));
+        snapshot.questsCompleted = Collections.singletonList("Cook's Assistant");
+        snapshot.collectionLogStatus = new CollectionLogReader.Status(true, 1, 100, 0);
+        snapshot.bankStatus = new GameStateReader.BankStatus(true, 1, "2026-07-08T10:00:00Z", null);
+
+        assertEquals(
+            "Scapestack planner updated for Lynx Titan: 24 skills, 180 quests, 44 diaries, 612 CL items, bank synced: 900 item stacks, no Slayer state. "
+                + "Open Scapestack /next for your session board.",
+            ScapestackSyncPlugin.buildSyncSuccessMessage(
+                "Lynx Titan",
+                snapshot,
+                "https://www.scapestack.org/api/sync",
+                "{\"ok\":true,\"counts\":{\"skills\":24,\"quests\":180,\"diaries\":44,\"collectionLogItems\":612,\"bankItems\":900}}"
+            )
+        );
+    }
+
+    @Test
     public void successMessagePrioritizesBankInstructionAfterCollectionLogLoaded() {
         GameStateReader.Snapshot snapshot = new GameStateReader.Snapshot();
         snapshot.collectionLogStatus = new CollectionLogReader.Status(true, 1, 100, 0);
@@ -340,11 +360,16 @@ public class ScapestackSyncPluginTest {
         ConfigChanged enabled = configChange("scapestackSync", "autoSync", "true");
         ConfigChanged disabled = configChange("scapestackSync", "autoSync", "false");
         ConfigChanged bankEnabled = configChange("scapestackSync", "syncBankItems", "true");
+        ConfigChanged syncNow = configChange("scapestackSync", "syncNow", "true");
+        ConfigChanged syncNowReset = configChange("scapestackSync", "syncNow", "false");
         ConfigChanged otherKey = configChange("scapestackSync", "chatFeedback", "true");
         ConfigChanged otherGroup = configChange("banktags", "autoSync", "true");
 
+        assertTrue(ScapestackSyncPlugin.isManualSyncRequest(syncNow));
+        assertFalse(ScapestackSyncPlugin.isManualSyncRequest(syncNowReset));
         assertTrue(ScapestackSyncPlugin.shouldSyncAfterConfigChange(enabled));
         assertFalse(ScapestackSyncPlugin.shouldSyncAfterConfigChange(disabled));
+        assertFalse(ScapestackSyncPlugin.shouldSyncAfterConfigChange(syncNow));
         assertTrue(ScapestackSyncPlugin.shouldSyncAfterConfigChange(bankEnabled, true));
         assertFalse(ScapestackSyncPlugin.shouldSyncAfterConfigChange(bankEnabled, false));
         assertFalse(ScapestackSyncPlugin.shouldSyncAfterConfigChange(otherKey));
@@ -401,6 +426,33 @@ public class ScapestackSyncPluginTest {
         assertFalse(ScapestackSyncPlugin.shouldQueueChat(false, true, "Scapestack sync complete."));
         assertFalse(ScapestackSyncPlugin.shouldQueueChat(true, true, ""));
         assertFalse(ScapestackSyncPlugin.shouldQueueChat(true, true, null));
+    }
+
+    @Test
+    public void manualSyncCooldownPreventsSpam() {
+        assertTrue(ScapestackSyncPlugin.manualSyncCooldownElapsed(0, 1000));
+        assertFalse(ScapestackSyncPlugin.manualSyncCooldownElapsed(1000, 2000));
+        assertTrue(ScapestackSyncPlugin.manualSyncCooldownElapsed(1000, 3500));
+    }
+
+    @Test
+    public void recoveryMessagesGiveActionableNextSteps() {
+        assertEquals(
+            "Scapestack needs reconnect: Token does not match RSN claim. Use Reconnect player, then Sync now.",
+            ScapestackSyncPlugin.recoveryMessageForHttpFailure(403, "Token does not match RSN claim")
+        );
+        assertEquals(
+            "Scapestack is temporarily unavailable. Try again later.",
+            ScapestackSyncPlugin.recoveryMessageForHttpFailure(500, "Database unavailable")
+        );
+        assertEquals(
+            "Scapestack is rate limiting syncs. Wait a moment, then Sync now.",
+            ScapestackSyncPlugin.recoveryMessageForHttpFailure(429, "Too many requests")
+        );
+        assertEquals(
+            "Scapestack needs attention: Bad payload.",
+            ScapestackSyncPlugin.recoveryMessageForHttpFailure(400, "Bad payload")
+        );
     }
 
     @Test

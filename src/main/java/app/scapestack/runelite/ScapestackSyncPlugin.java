@@ -84,6 +84,7 @@ public class ScapestackSyncPlugin extends Plugin {
     private static final int COLLECTION_LOG_GROUP_ID = 621;
     private static final String CONFIG_GROUP = "scapestackSync";
     private static final String KEY_SYNC_URL = "syncUrl";
+    private static final String KEY_SYNC_NOW = "syncNow";
     private static final String KEY_AUTO_SYNC = "autoSync";
     private static final String KEY_SYNC_BANK_ITEMS = "syncBankItems";
     private static final String KEY_FORCE_CLAIM = "forceClaimOnNextSync";
@@ -97,10 +98,12 @@ public class ScapestackSyncPlugin extends Plugin {
     private boolean optInHintShown;
     private volatile boolean running;
     private volatile Call activeCall;
+    private long lastManualSyncAtMs;
     private static final MediaType JSON = MediaType.parse("application/json");
     private static final String PLUGIN_VERSION = "0.2.0";
     private static final String USER_AGENT = "scapestack-plugin/" + PLUGIN_VERSION;
     private static final String OPT_IN_HINT = "Scapestack Sync installed. Enable Sync on login for verified skills, quests, diaries, CL and Slayer. Turn on bank readiness separately.";
+    private static final long MANUAL_SYNC_COOLDOWN_MS = 2_500L;
 
     @Override
     protected void startUp() {
@@ -139,12 +142,23 @@ public class ScapestackSyncPlugin extends Plugin {
         if (e.getGameState() == GameState.LOGGED_IN) {
             // Delay the read so the quest-list widget has time to populate.
             // 3s is RuneLite-community standard for this kind of poll.
-            clientThread.invokeLater(this::triggerSync);
+            clientThread.invokeLater(() -> triggerSync(false));
         }
     }
 
     @Subscribe
     public void onConfigChanged(ConfigChanged event) {
+        if (isManualSyncRequest(event)) {
+            configManager.setConfiguration(CONFIG_GROUP, KEY_SYNC_NOW, false);
+            if (client.getGameState() != GameState.LOGGED_IN) {
+                notifyChat("Scapestack: log in, then use Sync now.");
+                return;
+            }
+            log.debug("Manual Scapestack sync requested");
+            clientThread.invokeLater(() -> triggerSync(true));
+            return;
+        }
+
         if (!shouldSyncAfterConfigChange(event, config.autoSync())) return;
         if (client.getGameState() != GameState.LOGGED_IN) {
             notifyChat("Scapestack sync changed. Log in to send your first snapshot.");
@@ -152,7 +166,7 @@ public class ScapestackSyncPlugin extends Plugin {
         }
 
         log.debug("Scapestack sync config changed while logged in, scheduling sync");
-        clientThread.invokeLater(this::triggerSync);
+        clientThread.invokeLater(() -> triggerSync(false));
     }
 
     @Subscribe
@@ -163,7 +177,7 @@ public class ScapestackSyncPlugin extends Plugin {
             config.syncOnQuestComplete()
         )) {
             log.debug("Quest completion detected, scheduling re-sync");
-            clientThread.invokeLater(this::triggerSync);
+            clientThread.invokeLater(() -> triggerSync(false));
         }
     }
 
@@ -186,9 +200,20 @@ public class ScapestackSyncPlugin extends Plugin {
 
 
     private void triggerSync() {
+        triggerSync(false);
+    }
+
+    private void triggerSync(boolean manual) {
         String rsn = client.getLocalPlayer() != null ? client.getLocalPlayer().getName() : null;
         if (rsn == null || rsn.isBlank()) {
             log.debug("triggerSync called but RSN unknown — skipping");
+            if (manual) notifyChat("Scapestack: player name not ready yet. Try again in a moment.");
+            return;
+        }
+
+        long now = System.currentTimeMillis();
+        if (manual && !manualSyncCooldownElapsed(lastManualSyncAtMs, now)) {
+            notifyChat("Scapestack: wait a moment before syncing again.");
             return;
         }
 
@@ -218,7 +243,11 @@ public class ScapestackSyncPlugin extends Plugin {
         final String bodyJson = body.toString();
         if (!syncGate.tryStart()) {
             log.debug("Scapestack sync already in flight — skipping duplicate trigger");
+            if (manual) notifyChat("Scapestack is already syncing.");
             return;
+        }
+        if (manual) {
+            lastManualSyncAtMs = now;
         }
         notifyChat("Scapestack: updating planner for " + rsn + "...");
         Thread thread = newSyncThread(() -> {
@@ -294,7 +323,7 @@ public class ScapestackSyncPlugin extends Plugin {
                                 snap.questsCompleted.size(),
                                 snap.diariesCompleted.size(),
                                 snap.collectionLogItemIds.size());
-                            notifyChat(buildSyncSuccessMessage(rsn, snap, syncUrl));
+                            notifyChat(buildSyncSuccessMessage(rsn, snap, syncUrl, bodyText));
                         } else if (res.code() == 401 || res.code() == 403) {
                             // Local cache may be stale (token rotated, claim
                             // wiped, RSN claimed elsewhere). Drop the claimedRsn
@@ -303,16 +332,16 @@ public class ScapestackSyncPlugin extends Plugin {
                             log.warn("Sync rejected: {}. Will retry claim on next sync.",
                                 ServerResponseSummary.logDetail(res.code(), bodyText));
                             InstallToken.forgetClaim(configManager);
-                            notifyChat("Scapestack needs reconnect: " + detail + ". Sync again to retry.");
+                            notifyChat(recoveryMessageForHttpFailure(res.code(), detail));
                         } else {
                             String detail = ServerResponseSummary.failureDetail(res.code(), bodyText);
                             log.warn("Sync failed: {}", ServerResponseSummary.logDetail(res.code(), bodyText));
-                            notifyChat("Scapestack needs attention: " + detail + ".");
+                            notifyChat(recoveryMessageForHttpFailure(res.code(), detail));
                         }
                     }
                 } catch (IOException ex) {
                     log.warn("Sync request failed", ex);
-                    notifyChat("Scapestack needs attention: connection error.");
+                    notifyChat("Scapestack needs attention: check connection, then sync again.");
                 } finally {
                     clearActiveCall(call);
                 }
@@ -357,12 +386,27 @@ public class ScapestackSyncPlugin extends Plugin {
     }
 
     static String buildSyncSuccessMessage(String rsn, GameStateReader.Snapshot snap, String syncUrl) {
-        int questCount = snap.questsCompleted != null ? snap.questsCompleted.size() : 0;
-        int skillCount = snap.skills != null ? snap.skills.size() : 0;
-        int diaryCount = snap.diariesCompleted != null ? snap.diariesCompleted.size() : 0;
-        int collectionLogCount = snap.collectionLogItemIds != null ? snap.collectionLogItemIds.size() : 0;
-        int bankCount = snap.bankItems != null ? snap.bankItems.size() : 0;
+        return buildSyncSuccessMessage(rsn, snap, syncUrl, (ServerResponseSummary.AcceptedCounts) null);
+    }
+
+    static String buildSyncSuccessMessage(String rsn, GameStateReader.Snapshot snap, String syncUrl, String responseBody) {
+        return buildSyncSuccessMessage(rsn, snap, syncUrl, ServerResponseSummary.acceptedCounts(responseBody));
+    }
+
+    private static String buildSyncSuccessMessage(
+        String rsn,
+        GameStateReader.Snapshot snap,
+        String syncUrl,
+        ServerResponseSummary.AcceptedCounts acceptedCounts
+    ) {
+        int questCount = acceptedInt(acceptedCounts != null ? acceptedCounts.quests : null, snap.questsCompleted != null ? snap.questsCompleted.size() : 0);
+        int skillCount = acceptedInt(acceptedCounts != null ? acceptedCounts.skills : null, snap.skills != null ? snap.skills.size() : 0);
+        int diaryCount = acceptedInt(acceptedCounts != null ? acceptedCounts.diaries : null, snap.diariesCompleted != null ? snap.diariesCompleted.size() : 0);
+        int collectionLogCount = acceptedInt(acceptedCounts != null ? acceptedCounts.collectionLogItems : null, snap.collectionLogItemIds != null ? snap.collectionLogItemIds.size() : 0);
         GameStateReader.BankStatus bankStatus = effectiveBankStatus(snap);
+        if (acceptedCounts != null && acceptedCounts.bankItems != null && acceptedCounts.bankItems > 0 && bankStatus.itemCount != acceptedCounts.bankItems) {
+            bankStatus = new GameStateReader.BankStatus(true, acceptedCounts.bankItems, bankStatus.capturedAt, null);
+        }
         CollectionLogReader.Status collectionLogStatus = effectiveCollectionLogStatus(snap);
 
         StringBuilder message = new StringBuilder("Scapestack planner updated")
@@ -396,6 +440,10 @@ public class ScapestackSyncPlugin extends Plugin {
         }
 
         return message.append('.').toString();
+    }
+
+    private static int acceptedInt(Integer accepted, int fallback) {
+        return accepted != null ? Math.max(0, accepted) : fallback;
     }
 
     private static String formatCollectionLogStatus(int count, CollectionLogReader.Status status) {
@@ -609,6 +657,13 @@ public class ScapestackSyncPlugin extends Plugin {
         return shouldSyncAfterConfigChange(event, false);
     }
 
+    static boolean isManualSyncRequest(ConfigChanged event) {
+        return event != null
+            && CONFIG_GROUP.equals(event.getGroup())
+            && KEY_SYNC_NOW.equals(event.getKey())
+            && Boolean.parseBoolean(event.getNewValue());
+    }
+
     static boolean shouldSyncAfterConfigChange(ConfigChanged event, boolean autoSyncEnabled) {
         if (event == null || !CONFIG_GROUP.equals(event.getGroup())) return false;
         if (KEY_AUTO_SYNC.equals(event.getKey())) return Boolean.parseBoolean(event.getNewValue());
@@ -627,6 +682,24 @@ public class ScapestackSyncPlugin extends Plugin {
             && running
             && message != null
             && !message.isBlank();
+    }
+
+    static boolean manualSyncCooldownElapsed(long lastManualSyncAtMs, long nowMs) {
+        return lastManualSyncAtMs <= 0 || nowMs - lastManualSyncAtMs >= MANUAL_SYNC_COOLDOWN_MS;
+    }
+
+    static String recoveryMessageForHttpFailure(int statusCode, String detail) {
+        String clean = detail == null || detail.isBlank() ? "HTTP " + statusCode : detail.trim();
+        if (statusCode == 401 || statusCode == 403) {
+            return "Scapestack needs reconnect: " + clean + ". Use Reconnect player, then Sync now.";
+        }
+        if (statusCode >= 500) {
+            return "Scapestack is temporarily unavailable. Try again later.";
+        }
+        if (statusCode == 429) {
+            return "Scapestack is rate limiting syncs. Wait a moment, then Sync now.";
+        }
+        return "Scapestack needs attention: " + clean + ".";
     }
 
     static Thread newSyncThread(Runnable task) {

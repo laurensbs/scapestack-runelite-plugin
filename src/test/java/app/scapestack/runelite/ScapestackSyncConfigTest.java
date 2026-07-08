@@ -10,6 +10,7 @@ public class ScapestackSyncConfigTest {
 
     @Test
     public void defaultsRequireExplicitSyncOptIn() {
+        assertFalse(config.syncNow());
         assertFalse(config.autoSync());
         assertFalse(config.syncBankItems());
         assertFalse(config.syncOnQuestComplete());
@@ -31,7 +32,13 @@ public class ScapestackSyncConfigTest {
             .getMethod("syncBankItems")
             .getAnnotation(ConfigItem.class)
             .description();
+        String syncNowDescription = ScapestackSyncConfig.class
+            .getMethod("syncNow")
+            .getAnnotation(ConfigItem.class)
+            .description();
 
+        assertTrue(syncNowDescription.contains("Send a planner snapshot now"));
+        assertTrue(syncNowDescription.contains("Resets automatically"));
         assertTrue(autoSyncDescription.contains("account type, quests, skills, diaries, collection-log IDs and Slayer state"));
         assertTrue(autoSyncDescription.contains("Bank readiness stays separate"));
         assertTrue(bankSyncDescription.contains("bank item IDs, names and quantities"));

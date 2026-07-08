@@ -37,4 +37,23 @@ public class ServerResponseSummaryTest {
             ServerResponseSummary.logDetail(502, " upstream\nunavailable ")
         );
     }
+
+    @Test
+    public void extractsAcceptedCountsFromSuccessBody() {
+        ServerResponseSummary.AcceptedCounts counts = ServerResponseSummary.acceptedCounts(
+            "{\"ok\":true,\"counts\":{\"skills\":24,\"quests\":180,\"diaries\":44,\"collectionLogItems\":612,\"bankItems\":900}}"
+        );
+
+        assertEquals(Integer.valueOf(24), counts.skills);
+        assertEquals(Integer.valueOf(180), counts.quests);
+        assertEquals(Integer.valueOf(44), counts.diaries);
+        assertEquals(Integer.valueOf(612), counts.collectionLogItems);
+        assertEquals(Integer.valueOf(900), counts.bankItems);
+    }
+
+    @Test
+    public void ignoresMalformedAcceptedCounts() {
+        assertEquals(null, ServerResponseSummary.acceptedCounts("{\"ok\":true}"));
+        assertEquals(null, ServerResponseSummary.acceptedCounts("not json"));
+    }
 }

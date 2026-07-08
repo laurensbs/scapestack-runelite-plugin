@@ -9,6 +9,8 @@ hiscores heuristics.
 The plugin does not POST progress by default. Enable `Sync on login`
 in RuneLite settings to send login snapshots; optionally enable
 `Refresh after quests` for immediate quest refreshes.
+Use `Sync now` when you want to refresh the planner on demand; the toggle
+resets automatically after the sync starts.
 
 When sync succeeds, RuneLite chat stays compact: it confirms that Scapestack
 was updated and tells the player to open `/next`. It does not print the sync
