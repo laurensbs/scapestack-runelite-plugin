@@ -198,7 +198,12 @@ public class ScapestackSyncPlugin extends Plugin {
             // WidgetLoaded. If the player hasn't opened the CL this
             // session the list is empty — falls back to website's
             // collectionlog.net integration for that subset.
-            snap = reader.readSnapshot(client, collectionLogReader.snapshot(), config.syncBankItems());
+            snap = reader.readSnapshot(
+                client,
+                collectionLogReader.snapshot(),
+                collectionLogReader.status(),
+                config.syncBankItems()
+            );
         } catch (Exception ex) {
             log.warn("Failed to read game state", ex);
             return;
@@ -358,6 +363,7 @@ public class ScapestackSyncPlugin extends Plugin {
         int collectionLogCount = snap.collectionLogItemIds != null ? snap.collectionLogItemIds.size() : 0;
         int bankCount = snap.bankItems != null ? snap.bankItems.size() : 0;
         GameStateReader.BankStatus bankStatus = effectiveBankStatus(snap);
+        CollectionLogReader.Status collectionLogStatus = effectiveCollectionLogStatus(snap);
 
         StringBuilder message = new StringBuilder("Scapestack planner updated")
             .append(rsn != null && !rsn.isBlank() ? " for " + rsn.trim() : "")
@@ -365,7 +371,7 @@ public class ScapestackSyncPlugin extends Plugin {
             .append(formatCount(skillCount, "skill", "skills")).append(", ")
             .append(formatCount(questCount, "quest", "quests")).append(", ")
             .append(formatCount(diaryCount, "diary", "diaries")).append(", ")
-            .append(formatCollectionLogCount(collectionLogCount)).append(", ")
+            .append(formatCollectionLogStatus(collectionLogCount, collectionLogStatus)).append(", ")
             .append(formatBankStatus(bankStatus));
 
         if (snap.slayer != null) {
@@ -384,16 +390,37 @@ public class ScapestackSyncPlugin extends Plugin {
 
         if (rsn != null && !rsn.isBlank()) {
             message
-                .append(". Open Scapestack /next for your session board");
+                .append(". ")
+                .append(nextPlayerStep(collectionLogStatus, bankStatus));
             return message.toString();
         }
 
         return message.append('.').toString();
     }
 
-    private static String formatCollectionLogCount(int count) {
+    private static String formatCollectionLogStatus(int count, CollectionLogReader.Status status) {
         if (count > 0) return formatCount(count, "CL item", "CL items");
-        return "0 CL items (open Collection Log tabs once)";
+        if (status == null || !status.opened) {
+            return "CL not loaded";
+        }
+        if (!status.hasLoadedItemSlots()) {
+            return "CL opened, no item slots loaded";
+        }
+        return "0 CL items from loaded CL tabs";
+    }
+
+    private static String nextPlayerStep(CollectionLogReader.Status collectionLogStatus, GameStateReader.BankStatus bankStatus) {
+        if (collectionLogStatus == null || !collectionLogStatus.opened) {
+            return "Open Collection Log, click its tabs, then sync again.";
+        }
+        if (!collectionLogStatus.hasLoadedItemSlots()) {
+            return "Click Collection Log categories/tabs, then sync again.";
+        }
+        if (bankStatus != null && bankStatus.enabled && bankStatus.itemCount == 0
+            && "bank-not-opened-this-session".equals(bankStatus.unavailableReason)) {
+            return "Open your bank, then sync again for item checks.";
+        }
+        return "Open Scapestack /next for your session board.";
     }
 
     static String nextUrlFromSyncUrl(String syncUrl, String rsn) {
@@ -489,6 +516,13 @@ public class ScapestackSyncPlugin extends Plugin {
         }
         body.add("diariesCompleted", diaries);
         body.add("collectionLogItemIds", gson.toJsonTree(snap.collectionLogItemIds));
+        CollectionLogReader.Status collectionLogStatus = effectiveCollectionLogStatus(snap);
+        JsonObject collectionLogStatusJson = new JsonObject();
+        collectionLogStatusJson.addProperty("opened", collectionLogStatus.opened);
+        collectionLogStatusJson.addProperty("widgetLoads", collectionLogStatus.widgetLoads);
+        collectionLogStatusJson.addProperty("lastWidgetItemCount", collectionLogStatus.lastWidgetItemCount);
+        collectionLogStatusJson.addProperty("obtainedItemCount", collectionLogStatus.obtainedItemCount);
+        body.add("collectionLogStatus", collectionLogStatusJson);
         if (snap.bankItems != null && !snap.bankItems.isEmpty()) {
             JsonArray bankItems = new JsonArray();
             for (GameStateReader.BankItem item : snap.bankItems) {
@@ -539,6 +573,16 @@ public class ScapestackSyncPlugin extends Plugin {
             return new GameStateReader.BankStatus(true, bankCount, null, null);
         }
         return GameStateReader.BankStatus.optInOff();
+    }
+
+    private static CollectionLogReader.Status effectiveCollectionLogStatus(GameStateReader.Snapshot snap) {
+        if (snap.collectionLogStatus != null) {
+            return snap.collectionLogStatus;
+        }
+        int collectionLogCount = snap.collectionLogItemIds != null ? snap.collectionLogItemIds.size() : 0;
+        return collectionLogCount > 0
+            ? new CollectionLogReader.Status(true, 1, collectionLogCount, collectionLogCount)
+            : CollectionLogReader.Status.notOpened();
     }
 
     private static String formatCount(int count, String singular, String plural) {

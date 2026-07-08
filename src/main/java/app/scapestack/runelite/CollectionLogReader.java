@@ -36,13 +36,26 @@ public class CollectionLogReader {
     // In-memory accumulator. Cleared per-login by the plugin so a
     // stale account doesn't leak between players sharing a client.
     private final Set<Integer> obtainedItemIds = new HashSet<>();
+    private int widgetLoadCount;
+    private int lastWidgetItemCount;
 
     public synchronized void reset() {
         obtainedItemIds.clear();
+        widgetLoadCount = 0;
+        lastWidgetItemCount = 0;
     }
 
     public synchronized List<Integer> snapshot() {
         return new ArrayList<>(obtainedItemIds);
+    }
+
+    public synchronized Status status() {
+        return new Status(
+            widgetLoadCount > 0,
+            widgetLoadCount,
+            lastWidgetItemCount,
+            obtainedItemIds.size()
+        );
     }
 
     /**
@@ -57,7 +70,27 @@ public class CollectionLogReader {
      */
     public synchronized int ingest(Widget rootWidget) {
         if (rootWidget == null) return 0;
+        widgetLoadCount++;
+        lastWidgetItemCount = countItemWidgets(rootWidget);
         return extractInto(rootWidget, obtainedItemIds);
+    }
+
+    private static int countItemWidgets(Widget root) {
+        if (root == null) return 0;
+        int count = root.getItemId() > 0 ? 1 : 0;
+        Widget[] children = root.getDynamicChildren();
+        if (children != null) {
+            for (Widget c : children) {
+                count += countItemWidgets(c);
+            }
+        }
+        Widget[] statics = root.getStaticChildren();
+        if (statics != null) {
+            for (Widget c : statics) {
+                count += countItemWidgets(c);
+            }
+        }
+        return count;
     }
 
     /**
@@ -102,6 +135,24 @@ public class CollectionLogReader {
         return new ArrayList<>(dst);
     }
 
+    public static Status statusFromMock(MockWidget root) {
+        return new Status(
+            root != null,
+            root == null ? 0 : 1,
+            countMockItemWidgets(root),
+            extractFromMock(root).size()
+        );
+    }
+
+    private static int countMockItemWidgets(MockWidget root) {
+        if (root == null) return 0;
+        int count = root.itemId > 0 ? 1 : 0;
+        for (MockWidget c : root.children) {
+            count += countMockItemWidgets(c);
+        }
+        return count;
+    }
+
     private static void extractMockInto(MockWidget root, Set<Integer> dst) {
         if (root == null) return;
         for (MockWidget c : root.children) extractMockInto(c, dst);
@@ -130,6 +181,28 @@ public class CollectionLogReader {
 
         public static MockWidget item(int itemId, int quantity) {
             return new MockWidget(itemId, quantity);
+        }
+    }
+
+    public static final class Status {
+        public final boolean opened;
+        public final int widgetLoads;
+        public final int lastWidgetItemCount;
+        public final int obtainedItemCount;
+
+        public Status(boolean opened, int widgetLoads, int lastWidgetItemCount, int obtainedItemCount) {
+            this.opened = opened;
+            this.widgetLoads = widgetLoads;
+            this.lastWidgetItemCount = lastWidgetItemCount;
+            this.obtainedItemCount = obtainedItemCount;
+        }
+
+        public static Status notOpened() {
+            return new Status(false, 0, 0, 0);
+        }
+
+        public boolean hasLoadedItemSlots() {
+            return opened && lastWidgetItemCount > 0;
         }
     }
 }

@@ -58,6 +58,26 @@ public class CollectionLogReaderTest {
     }
 
     @Test
+    public void mockStatusDistinguishesOpenedFromLoadedItemSlots() {
+        CollectionLogReader.Status notOpened = CollectionLogReader.statusFromMock(null);
+        CollectionLogReader.Status openedEmpty = CollectionLogReader.statusFromMock(container());
+        CollectionLogReader.Status openedWithItems = CollectionLogReader.statusFromMock(container(
+            item(20997, 0),
+            item(22325, 1)
+        ));
+
+        assertFalse(notOpened.opened);
+        assertFalse(notOpened.hasLoadedItemSlots());
+        assertTrue(openedEmpty.opened);
+        assertFalse(openedEmpty.hasLoadedItemSlots());
+        assertEquals(0, openedEmpty.lastWidgetItemCount);
+        assertTrue(openedWithItems.opened);
+        assertTrue(openedWithItems.hasLoadedItemSlots());
+        assertEquals(2, openedWithItems.lastWidgetItemCount);
+        assertEquals(1, openedWithItems.obtainedItemCount);
+    }
+
+    @Test
     public void duplicateItemsAcrossCategoriesAppearOnce() {
         // OSRS does sometimes list the same item under multiple
         // categories (cape from achievement + cape from skilling).
@@ -93,5 +113,17 @@ public class CollectionLogReaderTest {
         assertEquals(2, session.size());
         assertTrue(session.contains(20997));
         assertTrue(session.contains(22325));
+    }
+
+    @Test
+    public void resetClearsCollectionLogStatus() {
+        CollectionLogReader reader = new CollectionLogReader();
+
+        assertFalse(reader.status().opened);
+        reader.reset();
+        assertFalse(reader.status().opened);
+        assertEquals(0, reader.status().widgetLoads);
+        assertEquals(0, reader.status().lastWidgetItemCount);
+        assertEquals(0, reader.status().obtainedItemCount);
     }
 }

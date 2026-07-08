@@ -35,6 +35,7 @@ public class ScapestackSyncPluginTest {
             new GameStateReader.DiaryCompletion("Karamja", "Easy")
         );
         snapshot.collectionLogItemIds = Arrays.asList(11785, 11787, 12922);
+        snapshot.collectionLogStatus = new CollectionLogReader.Status(true, 1, 100, 3);
         snapshot.bankItems = Arrays.asList(
             new GameStateReader.BankItem(1511, "Logs", 6),
             new GameStateReader.BankItem(2351, "Iron bar", 5)
@@ -59,6 +60,7 @@ public class ScapestackSyncPluginTest {
             "questsCompleted",
             "diariesCompleted",
             "collectionLogItemIds",
+            "collectionLogStatus",
             "bankStatus",
             "bankItems",
             "slayer"
@@ -88,6 +90,11 @@ public class ScapestackSyncPluginTest {
         assertEquals(2, payload.getAsJsonArray("bankItems").size());
         assertEquals(1511, payload.getAsJsonArray("bankItems").get(0).getAsJsonObject().get("id").getAsInt());
         assertEquals(6, payload.getAsJsonArray("bankItems").get(0).getAsJsonObject().get("quantity").getAsInt());
+        JsonObject collectionLogStatus = payload.getAsJsonObject("collectionLogStatus");
+        assertTrue(collectionLogStatus.get("opened").getAsBoolean());
+        assertEquals(1, collectionLogStatus.get("widgetLoads").getAsInt());
+        assertEquals(100, collectionLogStatus.get("lastWidgetItemCount").getAsInt());
+        assertEquals(3, collectionLogStatus.get("obtainedItemCount").getAsInt());
         assertTrue(payload.getAsJsonObject("bankStatus").get("enabled").getAsBoolean());
         assertEquals(2, payload.getAsJsonObject("bankStatus").get("itemCount").getAsInt());
     }
@@ -150,6 +157,7 @@ public class ScapestackSyncPluginTest {
             new GameStateReader.DiaryCompletion("Karamja", "Easy")
         );
         snapshot.collectionLogItemIds = Arrays.asList(11785, 11787, 12922);
+        snapshot.collectionLogStatus = new CollectionLogReader.Status(true, 1, 100, 3);
 
         assertEquals(
             "Scapestack planner updated: 0 skills, 2 quests, 1 diary, 3 CL items, bank sync off, no Slayer state.",
@@ -165,6 +173,7 @@ public class ScapestackSyncPluginTest {
             new GameStateReader.DiaryCompletion("Karamja", "Easy")
         );
         snapshot.collectionLogItemIds = Arrays.asList(11785, 11787, 12922);
+        snapshot.collectionLogStatus = new CollectionLogReader.Status(true, 1, 100, 3);
 
         String message = ScapestackSyncPlugin.buildSyncSuccessMessage(
             "Lynx Titan",
@@ -174,7 +183,7 @@ public class ScapestackSyncPluginTest {
 
         assertEquals(
             "Scapestack planner updated for Lynx Titan: 0 skills, 2 quests, 1 diary, 3 CL items, bank sync off, no Slayer state. "
-                + "Open Scapestack /next for your session board",
+                + "Open Scapestack /next for your session board.",
             message
         );
         assertFalse(message.contains("https://"));
@@ -188,6 +197,7 @@ public class ScapestackSyncPluginTest {
         snapshot.questsCompleted = Collections.emptyList();
         snapshot.diariesCompleted = Collections.emptyList();
         snapshot.collectionLogItemIds = Arrays.asList(20997, 12073);
+        snapshot.collectionLogStatus = new CollectionLogReader.Status(true, 1, 100, 2);
         snapshot.slayer = new GameStateReader.SlayerState(
             132,
             51,
@@ -215,8 +225,8 @@ public class ScapestackSyncPluginTest {
         );
 
         assertEquals(
-            "Scapestack planner updated for Lynx Titan: 0 skills, 0 quests, 0 diaries, 0 CL items (open Collection Log tabs once), bank synced: 1 item stack, no Slayer state. "
-                + "Open Scapestack /next for your session board",
+            "Scapestack planner updated for Lynx Titan: 0 skills, 0 quests, 0 diaries, CL not loaded, bank synced: 1 item stack, no Slayer state. "
+                + "Open Collection Log, click its tabs, then sync again.",
             message
         );
         assertFalse(message.contains("https://"));
@@ -230,8 +240,57 @@ public class ScapestackSyncPluginTest {
         snapshot.collectionLogItemIds = Collections.emptyList();
 
         assertEquals(
-            "Scapestack planner updated: 0 skills, 0 quests, 0 diaries, 0 CL items (open Collection Log tabs once), bank sync off, no Slayer state.",
+            "Scapestack planner updated: 0 skills, 0 quests, 0 diaries, CL not loaded, bank sync off, no Slayer state.",
             ScapestackSyncPlugin.buildSyncSuccessMessage(snapshot)
+        );
+    }
+
+    @Test
+    public void successMessageExplainsCollectionLogOpenedWithoutLoadedTabs() {
+        GameStateReader.Snapshot snapshot = new GameStateReader.Snapshot();
+        snapshot.collectionLogStatus = new CollectionLogReader.Status(true, 1, 0, 0);
+
+        assertEquals(
+            "Scapestack planner updated for Lynx Titan: 0 skills, 0 quests, 0 diaries, CL opened, no item slots loaded, bank sync off, no Slayer state. "
+                + "Click Collection Log categories/tabs, then sync again.",
+            ScapestackSyncPlugin.buildSyncSuccessMessage(
+                "Lynx Titan",
+                snapshot,
+                "https://www.scapestack.org/api/sync"
+            )
+        );
+    }
+
+    @Test
+    public void successMessageAllowsZeroObtainedItemsWhenCollectionLogSlotsLoaded() {
+        GameStateReader.Snapshot snapshot = new GameStateReader.Snapshot();
+        snapshot.collectionLogStatus = new CollectionLogReader.Status(true, 1, 100, 0);
+
+        assertEquals(
+            "Scapestack planner updated for Lynx Titan: 0 skills, 0 quests, 0 diaries, 0 CL items from loaded CL tabs, bank sync off, no Slayer state. "
+                + "Open Scapestack /next for your session board.",
+            ScapestackSyncPlugin.buildSyncSuccessMessage(
+                "Lynx Titan",
+                snapshot,
+                "https://www.scapestack.org/api/sync"
+            )
+        );
+    }
+
+    @Test
+    public void successMessagePrioritizesBankInstructionAfterCollectionLogLoaded() {
+        GameStateReader.Snapshot snapshot = new GameStateReader.Snapshot();
+        snapshot.collectionLogStatus = new CollectionLogReader.Status(true, 1, 100, 0);
+        snapshot.bankStatus = new GameStateReader.BankStatus(true, 0, null, "bank-not-opened-this-session");
+
+        assertEquals(
+            "Scapestack planner updated for Lynx Titan: 0 skills, 0 quests, 0 diaries, 0 CL items from loaded CL tabs, bank not opened this session, no Slayer state. "
+                + "Open your bank, then sync again for item checks.",
+            ScapestackSyncPlugin.buildSyncSuccessMessage(
+                "Lynx Titan",
+                snapshot,
+                "https://www.scapestack.org/api/sync"
+            )
         );
     }
 

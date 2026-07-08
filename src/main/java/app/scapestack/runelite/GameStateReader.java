@@ -45,6 +45,7 @@ public class GameStateReader {
         public List<SkillLevel> skills = new ArrayList<>();
         public List<DiaryCompletion> diariesCompleted = new ArrayList<>();
         public List<Integer> collectionLogItemIds = new ArrayList<>();
+        public CollectionLogReader.Status collectionLogStatus = CollectionLogReader.Status.notOpened();
         public List<BankItem> bankItems = new ArrayList<>();
         public BankStatus bankStatus = BankStatus.optInOff();
         public SlayerState slayer = null;
@@ -200,18 +201,38 @@ public class GameStateReader {
      *  instead of relying on a class field. The plugin calls this from
      *  triggerSync with the live reader's snapshot. */
     public Snapshot readSnapshot(Client client, List<Integer> collectionLogItemIds) {
-        return readSnapshot(client, collectionLogItemIds, false);
+        return readSnapshot(client, collectionLogItemIds, CollectionLogReader.Status.notOpened(), false);
+    }
+
+    public Snapshot readSnapshot(
+        Client client,
+        List<Integer> collectionLogItemIds,
+        CollectionLogReader.Status collectionLogStatus
+    ) {
+        return readSnapshot(client, collectionLogItemIds, collectionLogStatus, false);
     }
 
     /** Full snapshot path used by the plugin. Bank sync is a separate opt-in
      *  because it can expose wealth/gear. Inventory and equipment are never
      *  read by this plugin. */
     public Snapshot readSnapshot(Client client, List<Integer> collectionLogItemIds, boolean includeBankItems) {
+        return readSnapshot(client, collectionLogItemIds, CollectionLogReader.Status.notOpened(), includeBankItems);
+    }
+
+    public Snapshot readSnapshot(
+        Client client,
+        List<Integer> collectionLogItemIds,
+        CollectionLogReader.Status collectionLogStatus,
+        boolean includeBankItems
+    ) {
         Snapshot s = new Snapshot();
         s.questsCompleted = readQuests(client);
         s.skills = readSkills(client);
         s.diariesCompleted = readDiaries(client);
         s.collectionLogItemIds = collectionLogItemIds != null ? collectionLogItemIds : Collections.emptyList();
+        s.collectionLogStatus = collectionLogStatus != null
+            ? collectionLogStatus
+            : CollectionLogReader.Status.notOpened();
         BankSnapshot bank = includeBankItems
             ? readBankSnapshot(client)
             : new BankSnapshot(Collections.emptyList(), BankStatus.optInOff());
