@@ -2,12 +2,19 @@ package app.scapestack.runelite;
 
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
+import net.runelite.api.InventoryID;
+import net.runelite.api.Item;
+import net.runelite.api.ItemComposition;
+import net.runelite.api.ItemContainer;
 import net.runelite.api.Quest;
 import net.runelite.api.QuestState;
+import net.runelite.api.Skill;
+import net.runelite.api.vars.AccountType;
 import net.runelite.api.widgets.Widget;
 import net.runelite.api.widgets.WidgetInfo;
 
 import javax.inject.Singleton;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -35,9 +42,61 @@ public class GameStateReader {
 
     public static class Snapshot {
         public List<String> questsCompleted = new ArrayList<>();
+        public List<SkillLevel> skills = new ArrayList<>();
         public List<DiaryCompletion> diariesCompleted = new ArrayList<>();
         public List<Integer> collectionLogItemIds = new ArrayList<>();
+        public List<BankItem> bankItems = new ArrayList<>();
+        public BankStatus bankStatus = BankStatus.optInOff();
         public SlayerState slayer = null;
+        public String accountType = "normal";
+    }
+
+    public static class BankItem {
+        public final int id;
+        public final String name;
+        public final int quantity;
+        public BankItem(int id, String name, int quantity) {
+            this.id = id;
+            this.name = name;
+            this.quantity = quantity;
+        }
+    }
+
+    public static class BankStatus {
+        public final boolean enabled;
+        public final int itemCount;
+        public final String capturedAt;
+        public final String unavailableReason;
+
+        public BankStatus(boolean enabled, int itemCount, String capturedAt, String unavailableReason) {
+            this.enabled = enabled;
+            this.itemCount = itemCount;
+            this.capturedAt = capturedAt;
+            this.unavailableReason = unavailableReason;
+        }
+
+        public static BankStatus optInOff() {
+            return new BankStatus(false, 0, null, "opt-in-off");
+        }
+    }
+
+    private static class BankSnapshot {
+        final List<BankItem> items;
+        final BankStatus status;
+
+        BankSnapshot(List<BankItem> items, BankStatus status) {
+            this.items = items;
+            this.status = status;
+        }
+    }
+
+    public static class SkillLevel {
+        public final String name;
+        public final int level;
+        public SkillLevel(String name, int level) {
+            this.name = name;
+            this.level = level;
+        }
     }
 
     /** Slayer-state read uit VarPlayers. Null wanneer geen sessie of
@@ -71,8 +130,10 @@ public class GameStateReader {
     public Snapshot readSnapshot(Client client) {
         Snapshot s = new Snapshot();
         s.questsCompleted = readQuests(client);
+        s.skills = readSkills(client);
         s.diariesCompleted = readDiaries(client);
         s.collectionLogItemIds = readCollectionLog(client);
+        s.accountType = readAccountType(client);
         return s;
     }
 
@@ -139,12 +200,104 @@ public class GameStateReader {
      *  instead of relying on a class field. The plugin calls this from
      *  triggerSync with the live reader's snapshot. */
     public Snapshot readSnapshot(Client client, List<Integer> collectionLogItemIds) {
+        return readSnapshot(client, collectionLogItemIds, false);
+    }
+
+    /** Full snapshot path used by the plugin. Bank sync is a separate opt-in
+     *  because it can expose wealth/gear. Inventory and equipment are never
+     *  read by this plugin. */
+    public Snapshot readSnapshot(Client client, List<Integer> collectionLogItemIds, boolean includeBankItems) {
         Snapshot s = new Snapshot();
         s.questsCompleted = readQuests(client);
+        s.skills = readSkills(client);
         s.diariesCompleted = readDiaries(client);
         s.collectionLogItemIds = collectionLogItemIds != null ? collectionLogItemIds : Collections.emptyList();
+        BankSnapshot bank = includeBankItems
+            ? readBankSnapshot(client)
+            : new BankSnapshot(Collections.emptyList(), BankStatus.optInOff());
+        s.bankItems = bank.items;
+        s.bankStatus = bank.status;
         s.slayer = readSlayer(client);
+        s.accountType = readAccountType(client);
         return s;
+    }
+
+    private List<SkillLevel> readSkills(Client client) {
+        List<SkillLevel> out = new ArrayList<>();
+        for (Skill skill : Skill.values()) {
+            if (skill == Skill.OVERALL) continue;
+            try {
+                out.add(new SkillLevel(skill.getName(), client.getRealSkillLevel(skill)));
+            } catch (Exception ex) {
+                log.debug("Skill level read failed for {}", skill, ex);
+            }
+        }
+        return out;
+    }
+
+    private BankSnapshot readBankSnapshot(Client client) {
+        try {
+            ItemContainer bank = client.getItemContainer(InventoryID.BANK);
+            if (bank == null || bank.getItems() == null) {
+                return new BankSnapshot(
+                    Collections.emptyList(),
+                    new BankStatus(true, 0, null, "bank-not-opened-this-session")
+                );
+            }
+            List<BankItem> items = new ArrayList<>();
+            for (Item item : bank.getItems()) {
+                if (item == null || item.getId() <= 0 || item.getQuantity() <= 0) continue;
+                ItemComposition definition = client.getItemDefinition(item.getId());
+                String name = definition != null ? definition.getName() : "";
+                if (name == null || name.isBlank() || "null".equalsIgnoreCase(name)) continue;
+                items.add(new BankItem(item.getId(), name, item.getQuantity()));
+                if (items.size() >= 1200) break;
+            }
+            String capturedAt = items.isEmpty() ? null : Instant.now().toString();
+            return new BankSnapshot(
+                items,
+                new BankStatus(
+                    true,
+                    items.size(),
+                    capturedAt,
+                    items.isEmpty() ? "no-items-captured" : null
+                )
+            );
+        } catch (Exception ex) {
+            log.debug("Bank item read faalde — bank mogelijk niet geladen", ex);
+            return new BankSnapshot(
+                Collections.emptyList(),
+                new BankStatus(true, 0, null, "bank-not-opened-this-session")
+            );
+        }
+    }
+
+    private String readAccountType(Client client) {
+        try {
+            return normalizeAccountType(client.getAccountType());
+        } catch (Exception ex) {
+            log.debug("Account type read faalde — default normal", ex);
+            return "normal";
+        }
+    }
+
+    static String normalizeAccountType(AccountType accountType) {
+        if (accountType == null) return "normal";
+        switch (accountType) {
+            case IRONMAN:
+                return "ironman";
+            case HARDCORE_IRONMAN:
+                return "hardcore_ironman";
+            case ULTIMATE_IRONMAN:
+                return "ultimate_ironman";
+            case GROUP_IRONMAN:
+                return "group_ironman";
+            case HARDCORE_GROUP_IRONMAN:
+                return "hardcore_group_ironman";
+            case NORMAL:
+            default:
+                return "normal";
+        }
     }
 
     /** Slayer points + streak + current-task remaining + 6 block-slot

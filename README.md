@@ -2,18 +2,18 @@
 
 Syncs your OSRS quest, diary, collection-log, and Slayer state to
 [scapestack.org](https://www.scapestack.org) after you opt in via
-`Auto-sync on login`, so Path-to-Max can label quest, diary, collection-log
+`Sync on login`, so Path-to-Max can label quest, diary, collection-log
 and Slayer coverage from a verified RuneLite payload instead of only
 hiscores heuristics.
 
-The plugin does not POST progress by default. Enable `Auto-sync on login`
+The plugin does not POST progress by default. Enable `Sync on login`
 in RuneLite settings to send login snapshots; optionally enable
-`Sync on quest complete` for immediate quest refreshes.
+`Refresh after quests` for immediate quest refreshes.
 
-When sync succeeds, RuneLite chat shows the verified `/next` link for that RSN
-(`?source=plugin-sync&bank=none`). Local/self-hosted Sync endpoints produce
-local/self-hosted `/next` links, so testers do not accidentally jump to
-production after syncing against `localhost`.
+When sync succeeds, RuneLite chat stays compact: it confirms that Scapestack
+was updated and tells the player to open `/next`. It does not print the sync
+URL or a long query string. Local/self-hosted endpoints, including localhost, still keep the verified
+`/next?rsn=...&source=plugin-sync&bank=none` web state available for testers.
 
 ## Data contract
 

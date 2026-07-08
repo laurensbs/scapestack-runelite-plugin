@@ -51,7 +51,7 @@ command prints the full GitHub CLI sequence that rewrites the stale PR body and
 adds the reviewer packet comment in one pass. It keeps the review text aligned
 with the actual plugin: sync defaults are off, posted data is limited to opt-in
 game-state, HTTP runs off the RuneLite client thread, and the raw token is only sent as the Authorization bearer for claim and sync requests. Replace stale PR-body copy
-if it still says auto-sync defaults on or implies the raw token never leaves the client.
+if it still says sync-on-login defaults on or implies the raw token never leaves the client.
 
 Also keep the web-app merge contract visible in the PR body: successful sync
 opens `/next?rsn=...&source=plugin-sync&bank=none`, where `source=plugin-sync`
@@ -80,8 +80,8 @@ Once the standalone repo has a tagged release:
 3. Open a PR. CI runs `./gradlew build` against the pinned commit; if
    it goes green, a RuneLite maintainer reviews the code.
 4. Review can take 2–6 weeks. Common reasons for rejection:
-   - **External HTTP calls without user opt-in.** `Auto-sync on login`
-     and `Sync on quest complete` both default off. The player must enable
+   - **External HTTP calls without user opt-in.** `Sync on login`
+     and `Refresh after quests` both default off. The player must enable
      them in RuneLite settings before any progress POST happens. Document
      this in the PR body.
    - **PII/data leakage.** We POST RSN, plugin version, quest/diary state,

@@ -59,8 +59,8 @@ import java.util.Set;
 @Slf4j
 @PluginDescriptor(
     name = "Scapestack Sync",
-    description = "Sync your quest, diary, collection log and Slayer state to scapestack.org",
-    tags = {"external", "sync", "scapestack", "slayer"}
+    description = "Keep Scapestack's OSRS session planner current from RuneLite",
+    tags = {"external", "sync", "scapestack", "planner", "quests", "diaries"}
 )
 public class ScapestackSyncPlugin extends Plugin {
 
@@ -85,8 +85,11 @@ public class ScapestackSyncPlugin extends Plugin {
     private static final String CONFIG_GROUP = "scapestackSync";
     private static final String KEY_SYNC_URL = "syncUrl";
     private static final String KEY_AUTO_SYNC = "autoSync";
+    private static final String KEY_SYNC_BANK_ITEMS = "syncBankItems";
     private static final String KEY_FORCE_CLAIM = "forceClaimOnNextSync";
     private static final String DEFAULT_SYNC_URL = "https://www.scapestack.org/api/sync";
+    private static final String DEV_SYNC_URL_PROPERTY = "scapestack.syncUrl";
+    private static final String DEV_SYNC_URL_ENV = "SCAPESTACK_SYNC_URL";
 
     private ClaimClient claimClient;
     private SyncServiceReadiness syncServiceReadiness;
@@ -97,7 +100,7 @@ public class ScapestackSyncPlugin extends Plugin {
     private static final MediaType JSON = MediaType.parse("application/json");
     private static final String PLUGIN_VERSION = "0.2.0";
     private static final String USER_AGENT = "scapestack-plugin/" + PLUGIN_VERSION;
-    private static final String OPT_IN_HINT = "Scapestack Sync installed. Enable Auto-sync on login to send quests, diaries, CL and Slayer only — no bank or inventory.";
+    private static final String OPT_IN_HINT = "Scapestack Sync installed. Enable Sync on login for verified skills, quests, diaries, CL and Slayer. Turn on bank readiness separately.";
 
     @Override
     protected void startUp() {
@@ -142,13 +145,13 @@ public class ScapestackSyncPlugin extends Plugin {
 
     @Subscribe
     public void onConfigChanged(ConfigChanged event) {
-        if (!shouldSyncAfterConfigChange(event)) return;
+        if (!shouldSyncAfterConfigChange(event, config.autoSync())) return;
         if (client.getGameState() != GameState.LOGGED_IN) {
-            notifyChat("Scapestack sync enabled. Log in to send your first snapshot.");
+            notifyChat("Scapestack sync changed. Log in to send your first snapshot.");
             return;
         }
 
-        log.debug("Auto-sync enabled while logged in, scheduling first sync");
+        log.debug("Scapestack sync config changed while logged in, scheduling sync");
         clientThread.invokeLater(this::triggerSync);
     }
 
@@ -195,7 +198,7 @@ public class ScapestackSyncPlugin extends Plugin {
             // WidgetLoaded. If the player hasn't opened the CL this
             // session the list is empty — falls back to website's
             // collectionlog.net integration for that subset.
-            snap = reader.readSnapshot(client, collectionLogReader.snapshot());
+            snap = reader.readSnapshot(client, collectionLogReader.snapshot(), config.syncBankItems());
         } catch (Exception ex) {
             log.warn("Failed to read game state", ex);
             return;
@@ -212,18 +215,18 @@ public class ScapestackSyncPlugin extends Plugin {
             log.debug("Scapestack sync already in flight — skipping duplicate trigger");
             return;
         }
-        notifyChat("Scapestack sync started for " + rsn + "…");
+        notifyChat("Scapestack: updating planner for " + rsn + "...");
         Thread thread = newSyncThread(() -> {
             try {
-                String syncUrl = ClaimClient.normalizeSyncUrl(config.syncUrl());
+                String syncUrl = configuredSyncUrl();
                 if (syncUrl.isBlank()) {
                     log.warn("Scapestack sync URL is empty");
-                    notifyChat("Scapestack sync failed: Sync URL is empty.");
+                    notifyChat("Scapestack needs attention: developer endpoint is empty.");
                     return;
                 }
                 if (!ClaimClient.isHttpSyncUrl(syncUrl)) {
                     log.warn("Scapestack sync URL must be http(s): {}", syncUrl);
-                    notifyChat("Scapestack sync failed: Sync URL must start with http:// or https://.");
+                    notifyChat("Scapestack needs attention: developer endpoint is invalid.");
                     return;
                 }
 
@@ -232,14 +235,14 @@ public class ScapestackSyncPlugin extends Plugin {
                 if (!running) return;
                 if (!readiness.proceed) {
                     log.warn("Scapestack sync service is not ready: {}", readiness.message);
-                    notifyChat("Scapestack sync failed: " + readiness.message + ".");
+                    notifyChat("Scapestack needs attention: " + readiness.message + ".");
                     return;
                 }
 
                 if (config.forceClaimOnNextSync()) {
                     InstallToken.forgetClaim(configManager);
                     configManager.setConfiguration(CONFIG_GROUP, KEY_FORCE_CLAIM, false);
-                    notifyChat("Scapestack claim cache cleared. Retrying claim now.");
+                    notifyChat("Scapestack: reconnecting this RuneLite install.");
                 }
 
                 String token = InstallToken.getOrCreate(configManager);
@@ -271,7 +274,7 @@ public class ScapestackSyncPlugin extends Plugin {
                         .build();
                 } catch (IllegalArgumentException ex) {
                     log.warn("Scapestack sync URL is invalid: {}", syncUrl);
-                    notifyChat("Scapestack sync failed: invalid Sync URL.");
+                    notifyChat("Scapestack needs attention: developer endpoint is invalid.");
                     return;
                 }
 
@@ -295,16 +298,16 @@ public class ScapestackSyncPlugin extends Plugin {
                             log.warn("Sync rejected: {}. Will retry claim on next sync.",
                                 ServerResponseSummary.logDetail(res.code(), bodyText));
                             InstallToken.forgetClaim(configManager);
-                            notifyChat("Scapestack sync rejected: " + detail + ". Sync again to retry claim.");
+                            notifyChat("Scapestack needs reconnect: " + detail + ". Sync again to retry.");
                         } else {
                             String detail = ServerResponseSummary.failureDetail(res.code(), bodyText);
                             log.warn("Sync failed: {}", ServerResponseSummary.logDetail(res.code(), bodyText));
-                            notifyChat("Scapestack sync failed: " + detail + ".");
+                            notifyChat("Scapestack needs attention: " + detail + ".");
                         }
                     }
                 } catch (IOException ex) {
                     log.warn("Sync request failed", ex);
-                    notifyChat("Scapestack sync failed: connection error.");
+                    notifyChat("Scapestack needs attention: connection error.");
                 } finally {
                     clearActiveCall(call);
                 }
@@ -329,7 +332,7 @@ public class ScapestackSyncPlugin extends Plugin {
     }
 
     private void migrateLegacySyncUrl() {
-        String migrated = migrateLegacySyncUrl(config.syncUrl());
+        String migrated = migrateLegacySyncUrl(configManager.getConfiguration(CONFIG_GROUP, KEY_SYNC_URL));
         if (migrated != null) {
             configManager.setConfiguration(CONFIG_GROUP, KEY_SYNC_URL, migrated);
             log.info("Migrated Scapestack sync endpoint to {}", migrated);
@@ -350,15 +353,20 @@ public class ScapestackSyncPlugin extends Plugin {
 
     static String buildSyncSuccessMessage(String rsn, GameStateReader.Snapshot snap, String syncUrl) {
         int questCount = snap.questsCompleted != null ? snap.questsCompleted.size() : 0;
+        int skillCount = snap.skills != null ? snap.skills.size() : 0;
         int diaryCount = snap.diariesCompleted != null ? snap.diariesCompleted.size() : 0;
         int collectionLogCount = snap.collectionLogItemIds != null ? snap.collectionLogItemIds.size() : 0;
+        int bankCount = snap.bankItems != null ? snap.bankItems.size() : 0;
+        GameStateReader.BankStatus bankStatus = effectiveBankStatus(snap);
 
-        StringBuilder message = new StringBuilder("Scapestack v")
-            .append(PLUGIN_VERSION)
-            .append(" synced: ")
+        StringBuilder message = new StringBuilder("Scapestack planner updated")
+            .append(rsn != null && !rsn.isBlank() ? " for " + rsn.trim() : "")
+            .append(": ")
+            .append(formatCount(skillCount, "skill", "skills")).append(", ")
             .append(formatCount(questCount, "quest", "quests")).append(", ")
             .append(formatCount(diaryCount, "diary", "diaries")).append(", ")
-            .append(formatCollectionLogCount(collectionLogCount));
+            .append(formatCollectionLogCount(collectionLogCount)).append(", ")
+            .append(formatBankStatus(bankStatus));
 
         if (snap.slayer != null) {
             int blockCount = snap.slayer.blocks != null ? snap.slayer.blocks.size() : 0;
@@ -376,8 +384,7 @@ public class ScapestackSyncPlugin extends Plugin {
 
         if (rsn != null && !rsn.isBlank()) {
             message
-                .append(". Open verified /next (no bank sent): ")
-                .append(nextUrlFromSyncUrl(syncUrl, rsn));
+                .append(". Open Scapestack /next for your session board");
             return message.toString();
         }
 
@@ -438,12 +445,41 @@ public class ScapestackSyncPlugin extends Plugin {
         return null;
     }
 
+    private static String configuredSyncUrl() {
+        return configuredSyncUrl(
+            System.getProperty(DEV_SYNC_URL_PROPERTY),
+            System.getenv(DEV_SYNC_URL_ENV)
+        );
+    }
+
+    static String configuredSyncUrl(String propertyOverride, String envOverride) {
+        String override = propertyOverride != null && !propertyOverride.isBlank()
+            ? propertyOverride
+            : envOverride;
+        String candidate = override != null && !override.isBlank()
+            ? ClaimClient.normalizeSyncUrl(override)
+            : DEFAULT_SYNC_URL;
+        if (!ClaimClient.isHttpSyncUrl(candidate)) {
+            return DEFAULT_SYNC_URL;
+        }
+        return candidate;
+    }
+
     static JsonObject buildSyncPayload(String rsn, GameStateReader.Snapshot snap, Gson gson) {
         JsonObject body = new JsonObject();
         body.addProperty("rsn", rsn);
         body.addProperty("displayName", rsn);
         body.addProperty("pluginVersion", PLUGIN_VERSION);
+        body.addProperty("accountType", snap.accountType != null && !snap.accountType.isBlank() ? snap.accountType : "normal");
         body.add("questsCompleted", gson.toJsonTree(snap.questsCompleted));
+        JsonArray skills = new JsonArray();
+        for (GameStateReader.SkillLevel s : snap.skills) {
+            JsonObject row = new JsonObject();
+            row.addProperty("name", s.name);
+            row.addProperty("level", s.level);
+            skills.add(row);
+        }
+        body.add("skills", skills);
         JsonArray diaries = new JsonArray();
         for (GameStateReader.DiaryCompletion d : snap.diariesCompleted) {
             JsonObject row = new JsonObject();
@@ -453,6 +489,28 @@ public class ScapestackSyncPlugin extends Plugin {
         }
         body.add("diariesCompleted", diaries);
         body.add("collectionLogItemIds", gson.toJsonTree(snap.collectionLogItemIds));
+        if (snap.bankItems != null && !snap.bankItems.isEmpty()) {
+            JsonArray bankItems = new JsonArray();
+            for (GameStateReader.BankItem item : snap.bankItems) {
+                JsonObject row = new JsonObject();
+                row.addProperty("id", item.id);
+                row.addProperty("name", item.name);
+                row.addProperty("quantity", item.quantity);
+                bankItems.add(row);
+            }
+            body.add("bankItems", bankItems);
+        }
+        GameStateReader.BankStatus bankStatus = effectiveBankStatus(snap);
+        JsonObject bankStatusJson = new JsonObject();
+        bankStatusJson.addProperty("enabled", bankStatus.enabled);
+        bankStatusJson.addProperty("itemCount", bankStatus.itemCount);
+        if (bankStatus.capturedAt != null && !bankStatus.capturedAt.isBlank()) {
+            bankStatusJson.addProperty("capturedAt", bankStatus.capturedAt);
+        }
+        if (bankStatus.unavailableReason != null && !bankStatus.unavailableReason.isBlank()) {
+            bankStatusJson.addProperty("unavailableReason", bankStatus.unavailableReason);
+        }
+        body.add("bankStatus", bankStatusJson);
         // Slayer-state: only send it when the plugin could read it.
         if (snap.slayer != null) {
             JsonObject slayer = new JsonObject();
@@ -466,15 +524,54 @@ public class ScapestackSyncPlugin extends Plugin {
         return body;
     }
 
+    private static GameStateReader.BankStatus effectiveBankStatus(GameStateReader.Snapshot snap) {
+        int bankCount = snap.bankItems != null ? snap.bankItems.size() : 0;
+        if (snap.bankStatus != null
+            && bankCount > 0
+            && !snap.bankStatus.enabled
+            && "opt-in-off".equals(snap.bankStatus.unavailableReason)) {
+            return new GameStateReader.BankStatus(true, bankCount, null, null);
+        }
+        if (snap.bankStatus != null) {
+            return snap.bankStatus;
+        }
+        if (bankCount > 0) {
+            return new GameStateReader.BankStatus(true, bankCount, null, null);
+        }
+        return GameStateReader.BankStatus.optInOff();
+    }
+
     private static String formatCount(int count, String singular, String plural) {
         return count + " " + (count == 1 ? singular : plural);
     }
 
+    private static String formatBankStatus(GameStateReader.BankStatus status) {
+        if (status.itemCount > 0) {
+            return "bank synced: " + formatCount(status.itemCount, "item stack", "item stacks");
+        }
+        if (!status.enabled) {
+            return "bank sync off";
+        }
+        if ("bank-not-opened-this-session".equals(status.unavailableReason)) {
+            return "bank not opened this session";
+        }
+        if ("no-items-captured".equals(status.unavailableReason)) {
+            return "bank sync on, no items captured";
+        }
+        return "bank sync unavailable";
+    }
+
     static boolean shouldSyncAfterConfigChange(ConfigChanged event) {
-        return event != null
-            && CONFIG_GROUP.equals(event.getGroup())
-            && KEY_AUTO_SYNC.equals(event.getKey())
-            && Boolean.parseBoolean(event.getNewValue());
+        return shouldSyncAfterConfigChange(event, false);
+    }
+
+    static boolean shouldSyncAfterConfigChange(ConfigChanged event, boolean autoSyncEnabled) {
+        if (event == null || !CONFIG_GROUP.equals(event.getGroup())) return false;
+        if (KEY_AUTO_SYNC.equals(event.getKey())) return Boolean.parseBoolean(event.getNewValue());
+        if (KEY_SYNC_BANK_ITEMS.equals(event.getKey())) {
+            return autoSyncEnabled && Boolean.parseBoolean(event.getNewValue());
+        }
+        return false;
     }
 
     static boolean shouldShowOptInHint(GameState gameState, boolean autoSync, boolean alreadyShown) {

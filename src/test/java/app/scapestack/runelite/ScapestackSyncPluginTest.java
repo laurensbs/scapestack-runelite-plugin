@@ -27,10 +27,18 @@ public class ScapestackSyncPluginTest {
     public void syncPayloadMatchesDocumentedDataContract() {
         GameStateReader.Snapshot snapshot = new GameStateReader.Snapshot();
         snapshot.questsCompleted = Arrays.asList("Cook's Assistant", "Dragon Slayer I");
+        snapshot.skills = Arrays.asList(
+            new GameStateReader.SkillLevel("Agility", 35),
+            new GameStateReader.SkillLevel("Ranged", 70)
+        );
         snapshot.diariesCompleted = Collections.singletonList(
             new GameStateReader.DiaryCompletion("Karamja", "Easy")
         );
         snapshot.collectionLogItemIds = Arrays.asList(11785, 11787, 12922);
+        snapshot.bankItems = Arrays.asList(
+            new GameStateReader.BankItem(1511, "Logs", 6),
+            new GameStateReader.BankItem(2351, "Iron bar", 5)
+        );
         snapshot.slayer = new GameStateReader.SlayerState(
             132,
             51,
@@ -46,15 +54,18 @@ public class ScapestackSyncPluginTest {
             "rsn",
             "displayName",
             "pluginVersion",
+            "accountType",
+            "skills",
             "questsCompleted",
             "diariesCompleted",
             "collectionLogItemIds",
+            "bankStatus",
+            "bankItems",
             "slayer"
         )), fields);
 
         assertFalse(fields.contains("password"));
         assertFalse(fields.contains("email"));
-        assertFalse(fields.contains("bank"));
         assertFalse(fields.contains("inventory"));
         assertFalse(fields.contains("equipment"));
         assertFalse(fields.contains("chat"));
@@ -70,6 +81,65 @@ public class ScapestackSyncPluginTest {
             "currentTaskId",
             "blocks"
         )), slayer.keySet());
+        assertEquals("normal", payload.get("accountType").getAsString());
+        assertEquals(2, payload.getAsJsonArray("skills").size());
+        assertEquals("Agility", payload.getAsJsonArray("skills").get(0).getAsJsonObject().get("name").getAsString());
+        assertEquals(35, payload.getAsJsonArray("skills").get(0).getAsJsonObject().get("level").getAsInt());
+        assertEquals(2, payload.getAsJsonArray("bankItems").size());
+        assertEquals(1511, payload.getAsJsonArray("bankItems").get(0).getAsJsonObject().get("id").getAsInt());
+        assertEquals(6, payload.getAsJsonArray("bankItems").get(0).getAsJsonObject().get("quantity").getAsInt());
+        assertTrue(payload.getAsJsonObject("bankStatus").get("enabled").getAsBoolean());
+        assertEquals(2, payload.getAsJsonObject("bankStatus").get("itemCount").getAsInt());
+    }
+
+    @Test
+    public void syncPayloadCarriesAccountType() {
+        GameStateReader.Snapshot snapshot = new GameStateReader.Snapshot();
+        snapshot.accountType = "ultimate_ironman";
+
+        JsonObject payload = ScapestackSyncPlugin.buildSyncPayload("Uim Lynx", snapshot, new Gson());
+
+        assertEquals("ultimate_ironman", payload.get("accountType").getAsString());
+    }
+
+    @Test
+    public void syncPayloadOmitsBankItemsWhenBankSyncIsOff() {
+        GameStateReader.Snapshot snapshot = new GameStateReader.Snapshot();
+
+        JsonObject payload = ScapestackSyncPlugin.buildSyncPayload("Lynx Titan", snapshot, new Gson());
+
+        assertFalse(payload.has("bankItems"));
+        assertTrue(payload.has("bankStatus"));
+        assertFalse(payload.getAsJsonObject("bankStatus").get("enabled").getAsBoolean());
+        assertEquals("opt-in-off", payload.getAsJsonObject("bankStatus").get("unavailableReason").getAsString());
+    }
+
+    @Test
+    public void syncPayloadCarriesBankStatusWhenCaptured() {
+        GameStateReader.Snapshot snapshot = new GameStateReader.Snapshot();
+        snapshot.bankItems = Collections.singletonList(new GameStateReader.BankItem(1511, "Logs", 6));
+        snapshot.bankStatus = new GameStateReader.BankStatus(true, 1, "2026-07-08T10:00:00Z", null);
+
+        JsonObject payload = ScapestackSyncPlugin.buildSyncPayload("Lynx Titan", snapshot, new Gson());
+        JsonObject status = payload.getAsJsonObject("bankStatus");
+
+        assertTrue(status.get("enabled").getAsBoolean());
+        assertEquals(1, status.get("itemCount").getAsInt());
+        assertEquals("2026-07-08T10:00:00Z", status.get("capturedAt").getAsString());
+        assertFalse(status.has("unavailableReason"));
+    }
+
+    @Test
+    public void syncPayloadCarriesBankUnavailableReasonWhenBankNotOpened() {
+        GameStateReader.Snapshot snapshot = new GameStateReader.Snapshot();
+        snapshot.bankStatus = new GameStateReader.BankStatus(true, 0, null, "bank-not-opened-this-session");
+
+        JsonObject payload = ScapestackSyncPlugin.buildSyncPayload("Lynx Titan", snapshot, new Gson());
+        JsonObject status = payload.getAsJsonObject("bankStatus");
+
+        assertTrue(status.get("enabled").getAsBoolean());
+        assertEquals(0, status.get("itemCount").getAsInt());
+        assertEquals("bank-not-opened-this-session", status.get("unavailableReason").getAsString());
     }
 
     @Test
@@ -82,13 +152,13 @@ public class ScapestackSyncPluginTest {
         snapshot.collectionLogItemIds = Arrays.asList(11785, 11787, 12922);
 
         assertEquals(
-            "Scapestack v0.2.0 synced: 2 quests, 1 diary, 3 CL items, no Slayer state.",
+            "Scapestack planner updated: 0 skills, 2 quests, 1 diary, 3 CL items, bank sync off, no Slayer state.",
             ScapestackSyncPlugin.buildSyncSuccessMessage(snapshot)
         );
     }
 
     @Test
-    public void successMessageCanPointPlayerToVerifiedNextPlan() {
+    public void successMessagePointsPlayerToNextWithoutShowingUrl() {
         GameStateReader.Snapshot snapshot = new GameStateReader.Snapshot();
         snapshot.questsCompleted = Arrays.asList("Cook's Assistant", "Dragon Slayer I");
         snapshot.diariesCompleted = Collections.singletonList(
@@ -96,15 +166,20 @@ public class ScapestackSyncPluginTest {
         );
         snapshot.collectionLogItemIds = Arrays.asList(11785, 11787, 12922);
 
-        assertEquals(
-            "Scapestack v0.2.0 synced: 2 quests, 1 diary, 3 CL items, no Slayer state. "
-                + "Open verified /next (no bank sent): https://www.scapestack.org/next?rsn=Lynx+Titan&source=plugin-sync&bank=none",
-            ScapestackSyncPlugin.buildSyncSuccessMessage(
-                "Lynx Titan",
-                snapshot,
-                "https://www.scapestack.org/api/sync"
-            )
+        String message = ScapestackSyncPlugin.buildSyncSuccessMessage(
+            "Lynx Titan",
+            snapshot,
+            "https://www.scapestack.org/api/sync"
         );
+
+        assertEquals(
+            "Scapestack planner updated for Lynx Titan: 0 skills, 2 quests, 1 diary, 3 CL items, bank sync off, no Slayer state. "
+                + "Open Scapestack /next for your session board",
+            message
+        );
+        assertFalse(message.contains("https://"));
+        assertFalse(message.contains("?rsn="));
+        assertFalse(message.contains("source=plugin-sync"));
     }
 
     @Test
@@ -122,9 +197,29 @@ public class ScapestackSyncPluginTest {
         );
 
         assertEquals(
-            "Scapestack v0.2.0 synced: 0 quests, 0 diaries, 2 CL items, Slayer 47 left, 132 pts, 51 streak, 2 blocks.",
+            "Scapestack planner updated: 0 skills, 0 quests, 0 diaries, 2 CL items, bank sync off, Slayer 47 left, 132 pts, 51 streak, 2 blocks.",
             ScapestackSyncPlugin.buildSyncSuccessMessage(snapshot)
         );
+    }
+
+    @Test
+    public void successMessageSaysWhenRuneLiteBankWasSynced() {
+        GameStateReader.Snapshot snapshot = new GameStateReader.Snapshot();
+        snapshot.bankItems = Collections.singletonList(new GameStateReader.BankItem(1511, "Logs", 6));
+        snapshot.bankStatus = new GameStateReader.BankStatus(true, 1, "2026-07-08T10:00:00Z", null);
+
+        String message = ScapestackSyncPlugin.buildSyncSuccessMessage(
+            "Lynx Titan",
+            snapshot,
+            "https://www.scapestack.org/api/sync"
+        );
+
+        assertEquals(
+            "Scapestack planner updated for Lynx Titan: 0 skills, 0 quests, 0 diaries, 0 CL items (open Collection Log tabs once), bank synced: 1 item stack, no Slayer state. "
+                + "Open Scapestack /next for your session board",
+            message
+        );
+        assertFalse(message.contains("https://"));
     }
 
     @Test
@@ -135,7 +230,7 @@ public class ScapestackSyncPluginTest {
         snapshot.collectionLogItemIds = Collections.emptyList();
 
         assertEquals(
-            "Scapestack v0.2.0 synced: 0 quests, 0 diaries, 0 CL items (open Collection Log tabs once), no Slayer state.",
+            "Scapestack planner updated: 0 skills, 0 quests, 0 diaries, 0 CL items (open Collection Log tabs once), bank sync off, no Slayer state.",
             ScapestackSyncPlugin.buildSyncSuccessMessage(snapshot)
         );
     }
@@ -185,11 +280,14 @@ public class ScapestackSyncPluginTest {
     public void autoSyncConfigChangeTriggersImmediateFirstSyncOnlyWhenEnabled() {
         ConfigChanged enabled = configChange("scapestackSync", "autoSync", "true");
         ConfigChanged disabled = configChange("scapestackSync", "autoSync", "false");
+        ConfigChanged bankEnabled = configChange("scapestackSync", "syncBankItems", "true");
         ConfigChanged otherKey = configChange("scapestackSync", "chatFeedback", "true");
         ConfigChanged otherGroup = configChange("banktags", "autoSync", "true");
 
         assertTrue(ScapestackSyncPlugin.shouldSyncAfterConfigChange(enabled));
         assertFalse(ScapestackSyncPlugin.shouldSyncAfterConfigChange(disabled));
+        assertTrue(ScapestackSyncPlugin.shouldSyncAfterConfigChange(bankEnabled, true));
+        assertFalse(ScapestackSyncPlugin.shouldSyncAfterConfigChange(bankEnabled, false));
         assertFalse(ScapestackSyncPlugin.shouldSyncAfterConfigChange(otherKey));
         assertFalse(ScapestackSyncPlugin.shouldSyncAfterConfigChange(otherGroup));
         assertFalse(ScapestackSyncPlugin.shouldSyncAfterConfigChange(null));
@@ -205,8 +303,36 @@ public class ScapestackSyncPluginTest {
 
     @Test
     public void optInHintNamesTheSafePayloadScope() {
-        assertTrue(ScapestackSyncPlugin.optInHintMessage().contains("quests, diaries, CL and Slayer only"));
-        assertTrue(ScapestackSyncPlugin.optInHintMessage().contains("no bank or inventory"));
+        assertTrue(ScapestackSyncPlugin.optInHintMessage().contains("verified skills, quests, diaries, CL and Slayer"));
+        assertTrue(ScapestackSyncPlugin.optInHintMessage().contains("Turn on bank readiness separately"));
+    }
+
+    @Test
+    public void configuredSyncUrlDefaultsToOfficialEndpoint() {
+        assertEquals(
+            "https://www.scapestack.org/api/sync",
+            ScapestackSyncPlugin.configuredSyncUrl(null, null)
+        );
+    }
+
+    @Test
+    public void configuredSyncUrlAllowsHiddenDevOverride() {
+        assertEquals(
+            "http://127.0.0.1:4173/api/sync",
+            ScapestackSyncPlugin.configuredSyncUrl(" http://127.0.0.1:4173/api/sync/claim?debug=1 ", null)
+        );
+        assertEquals(
+            "http://localhost:4173/api/sync",
+            ScapestackSyncPlugin.configuredSyncUrl("", "http://localhost:4173/api/sync")
+        );
+    }
+
+    @Test
+    public void configuredSyncUrlRejectsInvalidHiddenOverride() {
+        assertEquals(
+            "https://www.scapestack.org/api/sync",
+            ScapestackSyncPlugin.configuredSyncUrl("ftp://example.com/api/sync", null)
+        );
     }
 
     @Test
