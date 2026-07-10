@@ -3,6 +3,7 @@ package app.scapestack.runelite;
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
+import net.runelite.client.config.Range;
 
 @ConfigGroup("scapestackSync")
 public interface ScapestackSyncConfig extends Config {
@@ -23,6 +24,19 @@ public interface ScapestackSyncConfig extends Config {
     )
     default boolean autoSync() {
         return false;
+    }
+
+    @Range(
+        min = 5,
+        max = 60
+    )
+    @ConfigItem(
+        keyName = "autoSyncIntervalMinutes",
+        name = "Refresh every",
+        description = "When Sync on login is on, refresh ScapeStack quietly while you play."
+    )
+    default int autoSyncIntervalMinutes() {
+        return 15;
     }
 
     @ConfigItem(

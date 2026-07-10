@@ -23,9 +23,12 @@ public class ScapestackSyncPanelTest {
         assertTrue(source.contains("Sync now"));
         assertTrue(source.contains("Account mode"));
         assertTrue(source.contains("Last sync"));
+        assertTrue(source.contains("Auto refresh"));
         assertTrue(source.contains("Next action"));
+        assertTrue(source.contains("Use recommended sync"));
         assertTrue(source.contains("Planner checks"));
         assertTrue(source.contains("Skills, quests, diaries, Slayer task and bank readiness"));
+        assertTrue(source.contains("Recommended sync refreshes after login and then every 15 minutes while you play"));
         assertTrue(source.contains("Turn bank checks off if you only want progress sync"));
         assertTrue(source.contains("Collection Log"));
         assertTrue(source.contains("Troubleshooting"));

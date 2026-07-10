@@ -35,6 +35,9 @@ import java.net.URI;
 import java.net.URLEncoder;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Scapestack Sync — reads the player's quest list, diary completion state,
@@ -89,7 +92,10 @@ public class ScapestackSyncPlugin extends Plugin {
     private static final String KEY_SYNC_URL = "syncUrl";
     static final String KEY_SYNC_NOW = "syncNow";
     static final String KEY_AUTO_SYNC = "autoSync";
+    static final String KEY_AUTO_SYNC_INTERVAL_MINUTES = "autoSyncIntervalMinutes";
     static final String KEY_SYNC_BANK_ITEMS = "syncBankItems";
+    static final String KEY_CHAT_FEEDBACK = "chatFeedback";
+    private static final String KEY_LAST_SYNC_AT_MS = "lastSyncAtMs";
     private static final String KEY_FORCE_CLAIM = "forceClaimOnNextSync";
     private static final String DEFAULT_SYNC_URL = "https://www.scapestack.org/api/sync";
     private static final String DEV_SYNC_URL_PROPERTY = "scapestack.syncUrl";
@@ -102,6 +108,8 @@ public class ScapestackSyncPlugin extends Plugin {
     private volatile boolean running;
     private volatile Call activeCall;
     private long lastManualSyncAtMs;
+    private volatile long lastAutoSyncAtMs;
+    private ScheduledExecutorService autoSyncScheduler;
     private ScapestackSyncPanel panel;
     private NavigationButton navigationButton;
     private static final MediaType JSON = MediaType.parse("application/json");
@@ -109,6 +117,9 @@ public class ScapestackSyncPlugin extends Plugin {
     private static final String USER_AGENT = "scapestack-plugin/" + PLUGIN_VERSION;
     private static final String OPT_IN_HINT = "ScapeStack is ready. Turn on Sync on login to keep your planner updated.";
     private static final long MANUAL_SYNC_COOLDOWN_MS = 2_500L;
+    static final int DEFAULT_AUTO_SYNC_INTERVAL_MINUTES = 15;
+    private static final int MIN_AUTO_SYNC_INTERVAL_MINUTES = 5;
+    private static final int MAX_AUTO_SYNC_INTERVAL_MINUTES = 60;
 
     @Override
     protected void startUp() {
@@ -119,12 +130,14 @@ public class ScapestackSyncPlugin extends Plugin {
         running = true;
         migrateLegacySyncUrl();
         installPanel();
+        startAutoSyncScheduler();
         log.info("Scapestack Sync started");
     }
 
     @Override
     protected void shutDown() {
         running = false;
+        stopAutoSyncScheduler();
         cancelSyncCall(activeCall);
         removePanel();
         log.info("Scapestack Sync stopped");
@@ -263,6 +276,8 @@ public class ScapestackSyncPlugin extends Plugin {
         }
         if (manual) {
             lastManualSyncAtMs = now;
+        } else {
+            lastAutoSyncAtMs = now;
         }
         notifyChat("ScapeStack is syncing your progress...");
         Thread thread = newSyncThread(() -> {
@@ -342,6 +357,7 @@ public class ScapestackSyncPlugin extends Plugin {
                                 snap.questsCompleted.size(),
                                 snap.diariesCompleted.size(),
                                 snap.collectionLogItemIds.size());
+                            rememberLastSync(System.currentTimeMillis());
                             updatePanelSnapshot(rsn, snap, "Synced");
                             notifyChat(buildSyncSuccessMessage(rsn, snap, syncUrl, bodyText));
                         } else if (res.code() == 401 || res.code() == 403) {
@@ -411,6 +427,7 @@ public class ScapestackSyncPlugin extends Plugin {
         clientToolbar.addNavigation(navigationButton);
         panel.setStatus("Ready");
         panel.setAccountMode(accountModeLabel(null));
+        panel.setLastSync(formatLastSync(readLastSyncAtMs(), System.currentTimeMillis()));
         panel.setNextAction("Press Sync now");
         panel.refresh();
     }
@@ -453,6 +470,51 @@ public class ScapestackSyncPlugin extends Plugin {
     private void refreshPanel() {
         if (panel != null) {
             panel.refresh();
+        }
+    }
+
+    private void startAutoSyncScheduler() {
+        autoSyncScheduler = Executors.newSingleThreadScheduledExecutor(task -> {
+            Thread thread = new Thread(task, "scapestack-auto-sync");
+            thread.setDaemon(true);
+            return thread;
+        });
+        autoSyncScheduler.scheduleWithFixedDelay(() -> {
+            if (!running) return;
+            long now = System.currentTimeMillis();
+            if (!shouldRunIntervalSync(
+                client.getGameState(),
+                config.autoSync(),
+                config.autoSyncIntervalMinutes(),
+                lastAutoSyncAtMs,
+                now
+            )) {
+                return;
+            }
+            lastAutoSyncAtMs = now;
+            updatePanelStatus("Refreshing");
+            clientThread.invokeLater(() -> triggerSync(false));
+        }, 60, 60, TimeUnit.SECONDS);
+    }
+
+    private void stopAutoSyncScheduler() {
+        if (autoSyncScheduler != null) {
+            autoSyncScheduler.shutdownNow();
+        }
+        autoSyncScheduler = null;
+    }
+
+    private void rememberLastSync(long nowMs) {
+        configManager.setConfiguration(CONFIG_GROUP, KEY_LAST_SYNC_AT_MS, String.valueOf(nowMs));
+    }
+
+    private long readLastSyncAtMs() {
+        String stored = configManager.getConfiguration(CONFIG_GROUP, KEY_LAST_SYNC_AT_MS);
+        if (stored == null || stored.isBlank()) return 0;
+        try {
+            return Long.parseLong(stored);
+        } catch (NumberFormatException ignored) {
+            return 0;
         }
     }
 
@@ -799,6 +861,36 @@ public class ScapestackSyncPlugin extends Plugin {
 
     static boolean manualSyncCooldownElapsed(long lastManualSyncAtMs, long nowMs) {
         return lastManualSyncAtMs <= 0 || nowMs - lastManualSyncAtMs >= MANUAL_SYNC_COOLDOWN_MS;
+    }
+
+    static int normalizedAutoSyncIntervalMinutes(int minutes) {
+        if (minutes < MIN_AUTO_SYNC_INTERVAL_MINUTES) return MIN_AUTO_SYNC_INTERVAL_MINUTES;
+        if (minutes > MAX_AUTO_SYNC_INTERVAL_MINUTES) return MAX_AUTO_SYNC_INTERVAL_MINUTES;
+        return minutes;
+    }
+
+    static boolean shouldRunIntervalSync(
+        GameState gameState,
+        boolean autoSync,
+        int intervalMinutes,
+        long lastAutoSyncAtMs,
+        long nowMs
+    ) {
+        if (gameState != GameState.LOGGED_IN || !autoSync) return false;
+        long intervalMs = normalizedAutoSyncIntervalMinutes(intervalMinutes) * 60_000L;
+        return lastAutoSyncAtMs <= 0 || nowMs - lastAutoSyncAtMs >= intervalMs;
+    }
+
+    static String formatLastSync(long lastSyncAtMs, long nowMs) {
+        if (lastSyncAtMs <= 0) return "Not synced yet";
+        long ageMs = Math.max(0, nowMs - lastSyncAtMs);
+        long minutes = ageMs / 60_000L;
+        if (minutes < 1) return "Just now";
+        if (minutes < 60) return minutes + "m ago";
+        long hours = minutes / 60L;
+        if (hours < 24) return hours + "h ago";
+        long days = hours / 24L;
+        return days + "d ago";
     }
 
     static String recoveryMessageForHttpFailure(int statusCode, String detail) {

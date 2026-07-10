@@ -12,6 +12,7 @@ public class ScapestackSyncConfigTest {
     public void defaultsRequireExplicitSyncOptIn() {
         assertFalse(config.syncNow());
         assertFalse(config.autoSync());
+        assertEquals(15, config.autoSyncIntervalMinutes());
         assertTrue(config.syncBankItems());
         assertFalse(config.syncOnQuestComplete());
         assertFalse(config.forceClaimOnNextSync());
@@ -28,6 +29,10 @@ public class ScapestackSyncConfigTest {
             .getMethod("syncOnQuestComplete")
             .getAnnotation(ConfigItem.class)
             .description();
+        String intervalDescription = ScapestackSyncConfig.class
+            .getMethod("autoSyncIntervalMinutes")
+            .getAnnotation(ConfigItem.class)
+            .description();
         String bankSyncDescription = ScapestackSyncConfig.class
             .getMethod("syncBankItems")
             .getAnnotation(ConfigItem.class)
@@ -39,6 +44,7 @@ public class ScapestackSyncConfigTest {
 
         assertTrue(syncNowDescription.contains("Refresh your ScapeStack planner now"));
         assertTrue(autoSyncDescription.contains("account mode, skills, quests, diaries, Slayer task and bank readiness"));
+        assertTrue(intervalDescription.contains("refresh ScapeStack quietly while you play"));
         assertTrue(bankSyncDescription.contains("Includes bank item names, IDs and quantities"));
         assertTrue(bankSyncDescription.contains("Turn off if you only want progress sync"));
         assertTrue(bankSyncDescription.contains("Never sends inventory, equipment, chat, screenshots or login details"));
@@ -46,6 +52,7 @@ public class ScapestackSyncConfigTest {
 
         assertNoNormalUserTech(syncNowDescription);
         assertNoNormalUserTech(autoSyncDescription);
+        assertNoNormalUserTech(intervalDescription);
         assertNoNormalUserTech(bankSyncDescription);
         assertNoNormalUserTech(questSyncDescription);
     }

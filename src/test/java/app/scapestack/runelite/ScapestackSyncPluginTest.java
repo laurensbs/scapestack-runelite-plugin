@@ -476,6 +476,30 @@ public class ScapestackSyncPluginTest {
     }
 
     @Test
+    public void intervalSyncRequiresOptInLoginAndElapsedTime() {
+        assertEquals(15, ScapestackSyncPlugin.normalizedAutoSyncIntervalMinutes(15));
+        assertEquals(5, ScapestackSyncPlugin.normalizedAutoSyncIntervalMinutes(1));
+        assertEquals(60, ScapestackSyncPlugin.normalizedAutoSyncIntervalMinutes(90));
+
+        assertTrue(ScapestackSyncPlugin.shouldRunIntervalSync(GameState.LOGGED_IN, true, 15, 0, 60_000));
+        assertFalse(ScapestackSyncPlugin.shouldRunIntervalSync(GameState.LOGGED_IN, false, 15, 0, 60_000));
+        assertFalse(ScapestackSyncPlugin.shouldRunIntervalSync(GameState.LOGIN_SCREEN, true, 15, 0, 60_000));
+        assertFalse(ScapestackSyncPlugin.shouldRunIntervalSync(GameState.LOGGED_IN, true, 15, 1000, 14 * 60_000));
+        assertTrue(ScapestackSyncPlugin.shouldRunIntervalSync(GameState.LOGGED_IN, true, 15, 1000, 16 * 60_000));
+    }
+
+    @Test
+    public void lastSyncLabelUsesPlayerFriendlyAge() {
+        long now = 10 * 24 * 60 * 60 * 1000L;
+
+        assertEquals("Not synced yet", ScapestackSyncPlugin.formatLastSync(0, now));
+        assertEquals("Just now", ScapestackSyncPlugin.formatLastSync(now - 10_000, now));
+        assertEquals("5m ago", ScapestackSyncPlugin.formatLastSync(now - 5 * 60_000, now));
+        assertEquals("2h ago", ScapestackSyncPlugin.formatLastSync(now - 2 * 60 * 60_000, now));
+        assertEquals("3d ago", ScapestackSyncPlugin.formatLastSync(now - 3 * 24 * 60 * 60_000, now));
+    }
+
+    @Test
     public void recoveryMessagesGiveActionableNextSteps() {
         assertEquals(
             "ScapeStack needs reconnect. Press Reconnect player, then Sync now.",
