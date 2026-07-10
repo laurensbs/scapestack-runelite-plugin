@@ -86,6 +86,28 @@ final class ServerResponseSummary {
         }
     }
 
+    static boolean hasNewProgress(String body) {
+        if (body == null || body.isBlank()) return false;
+        try {
+            JsonElement parsed = new JsonParser().parse(body);
+            if (!parsed.isJsonObject()) return false;
+            JsonObject root = parsed.getAsJsonObject();
+            JsonElement summaryElement = root.get("syncSummary");
+            if (summaryElement == null || !summaryElement.isJsonObject()) return false;
+            JsonObject summary = summaryElement.getAsJsonObject();
+            return arrayHasItems(summary, "questsCompleted")
+                || arrayHasItems(summary, "diariesCompleted")
+                || arrayHasItems(summary, "collectionLogItemIds");
+        } catch (RuntimeException ex) {
+            return false;
+        }
+    }
+
+    private static boolean arrayHasItems(JsonObject object, String key) {
+        JsonElement element = object.get(key);
+        return element != null && element.isJsonArray() && element.getAsJsonArray().size() > 0;
+    }
+
     private static Integer integerField(JsonObject object, String key) {
         JsonElement element = object.get(key);
         if (element == null || !element.isJsonPrimitive()) return null;

@@ -78,6 +78,22 @@ public class CollectionLogReaderTest {
     }
 
     @Test
+    public void playerInstructionAvoidsWidgetJargon() {
+        assertEquals(
+            "Open Collection Log once, then sync again.",
+            CollectionLogReader.playerInstruction(CollectionLogReader.Status.notOpened())
+        );
+        assertEquals(
+            "Click a Collection Log category, then sync again.",
+            CollectionLogReader.playerInstruction(new CollectionLogReader.Status(true, 1, 0, 0))
+        );
+        assertEquals(
+            "Collection Log synced.",
+            CollectionLogReader.playerInstruction(new CollectionLogReader.Status(true, 1, 12, 3))
+        );
+    }
+
+    @Test
     public void duplicateItemsAcrossCategoriesAppearOnce() {
         // OSRS does sometimes list the same item under multiple
         // categories (cape from achievement + cape from skilling).

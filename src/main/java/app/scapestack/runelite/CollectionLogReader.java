@@ -144,6 +144,16 @@ public class CollectionLogReader {
         );
     }
 
+    public static String playerInstruction(Status status) {
+        if (status == null || !status.opened) {
+            return "Open Collection Log once, then sync again.";
+        }
+        if (!status.hasLoadedItemSlots()) {
+            return "Click a Collection Log category, then sync again.";
+        }
+        return "Collection Log synced.";
+    }
+
     private static int countMockItemWidgets(MockWidget root) {
         if (root == null) return 0;
         int count = root.itemId > 0 ? 1 : 0;

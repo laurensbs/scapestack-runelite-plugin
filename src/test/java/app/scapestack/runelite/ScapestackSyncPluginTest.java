@@ -160,7 +160,7 @@ public class ScapestackSyncPluginTest {
         snapshot.collectionLogStatus = new CollectionLogReader.Status(true, 1, 100, 3);
 
         assertEquals(
-            "Scapestack planner updated: 0 skills, 2 quests, 1 diary, 3 CL items, bank sync off, no Slayer state.",
+            "Quest and diary progress synced.",
             ScapestackSyncPlugin.buildSyncSuccessMessage(snapshot)
         );
     }
@@ -182,13 +182,14 @@ public class ScapestackSyncPluginTest {
         );
 
         assertEquals(
-            "Scapestack planner updated for Lynx Titan: 0 skills, 2 quests, 1 diary, 3 CL items, bank sync off, no Slayer state. "
-                + "Open Scapestack /next for your session board.",
+            "Quest and diary progress synced.",
             message
         );
+        assertNoPlayerTech(message);
         assertFalse(message.contains("https://"));
         assertFalse(message.contains("?rsn="));
         assertFalse(message.contains("source=plugin-sync"));
+        assertFalse(message.contains("/next"));
     }
 
     @Test
@@ -207,7 +208,7 @@ public class ScapestackSyncPluginTest {
         );
 
         assertEquals(
-            "Scapestack planner updated: 0 skills, 0 quests, 0 diaries, 2 CL items, bank sync off, Slayer 47 left, 132 pts, 51 streak, 2 blocks.",
+            "Quest and diary progress synced.",
             ScapestackSyncPlugin.buildSyncSuccessMessage(snapshot)
         );
     }
@@ -225,11 +226,53 @@ public class ScapestackSyncPluginTest {
         );
 
         assertEquals(
-            "Scapestack planner updated for Lynx Titan: 0 skills, 0 quests, 0 diaries, CL not loaded, bank synced: 1 item stack, no Slayer state. "
-                + "Open Collection Log, click its tabs, then sync again.",
+            "ScapeStack synced your bank.",
             message
         );
+        assertNoPlayerTech(message);
         assertFalse(message.contains("https://"));
+    }
+
+    @Test
+    public void successMessageCallsOutNewQuestProgressFromServer() {
+        GameStateReader.Snapshot snapshot = new GameStateReader.Snapshot();
+        snapshot.questsCompleted = Collections.singletonList("Biohazard");
+        snapshot.diariesCompleted = Collections.emptyList();
+        snapshot.collectionLogItemIds = Collections.emptyList();
+
+        String message = ScapestackSyncPlugin.buildSyncSuccessMessage(
+            "Lynx Titan",
+            snapshot,
+            "https://www.scapestack.org/api/sync",
+            "{\"ok\":true,\"syncSummary\":{\"questsCompleted\":[\"Biohazard\"],\"diariesCompleted\":[],\"collectionLogItemIds\":[]}}"
+        );
+
+        assertEquals("ScapeStack synced. Next trip updated.", message);
+        assertNoPlayerTech(message);
+    }
+
+    @Test
+    public void successMessageCallsOutIronmanModeWithoutDebugCopy() {
+        GameStateReader.Snapshot snapshot = new GameStateReader.Snapshot();
+        snapshot.accountType = "ironman";
+        snapshot.bankItems = Collections.singletonList(new GameStateReader.BankItem(1511, "Logs", 6));
+        snapshot.bankStatus = new GameStateReader.BankStatus(true, 1, "2026-07-08T10:00:00Z", null);
+
+        String message = ScapestackSyncPlugin.buildSyncSuccessMessage(snapshot);
+
+        assertEquals("ScapeStack synced your bank. Ironman mode detected.", message);
+        assertNoPlayerTech(message);
+    }
+
+    @Test
+    public void accountModeLabelsCoverSupportedModes() {
+        assertEquals("Normal account", ScapestackSyncPlugin.accountModeLabel("normal"));
+        assertEquals("Ironman mode", ScapestackSyncPlugin.accountModeLabel("ironman"));
+        assertEquals("Hardcore Ironman mode", ScapestackSyncPlugin.accountModeLabel("hardcore_ironman"));
+        assertEquals("Ultimate Ironman mode", ScapestackSyncPlugin.accountModeLabel("ultimate_ironman"));
+        assertEquals("Group Ironman mode", ScapestackSyncPlugin.accountModeLabel("group_ironman"));
+        assertEquals("Group Ironman mode", ScapestackSyncPlugin.accountModeLabel("hardcore_group_ironman"));
+        assertEquals("Account mode unknown", ScapestackSyncPlugin.accountModeLabel(""));
     }
 
     @Test
@@ -240,7 +283,7 @@ public class ScapestackSyncPluginTest {
         snapshot.collectionLogItemIds = Collections.emptyList();
 
         assertEquals(
-            "Scapestack planner updated: 0 skills, 0 quests, 0 diaries, CL not loaded, bank sync off, no Slayer state.",
+            "Quest and diary progress synced. Open Collection Log once, then sync again.",
             ScapestackSyncPlugin.buildSyncSuccessMessage(snapshot)
         );
     }
@@ -251,8 +294,7 @@ public class ScapestackSyncPluginTest {
         snapshot.collectionLogStatus = new CollectionLogReader.Status(true, 1, 0, 0);
 
         assertEquals(
-            "Scapestack planner updated for Lynx Titan: 0 skills, 0 quests, 0 diaries, CL opened, no item slots loaded, bank sync off, no Slayer state. "
-                + "Click Collection Log categories/tabs, then sync again.",
+            "Click a Collection Log category, then sync again.",
             ScapestackSyncPlugin.buildSyncSuccessMessage(
                 "Lynx Titan",
                 snapshot,
@@ -267,8 +309,7 @@ public class ScapestackSyncPluginTest {
         snapshot.collectionLogStatus = new CollectionLogReader.Status(true, 1, 100, 0);
 
         assertEquals(
-            "Scapestack planner updated for Lynx Titan: 0 skills, 0 quests, 0 diaries, 0 CL items from loaded CL tabs, bank sync off, no Slayer state. "
-                + "Open Scapestack /next for your session board.",
+            "Quest and diary progress synced.",
             ScapestackSyncPlugin.buildSyncSuccessMessage(
                 "Lynx Titan",
                 snapshot,
@@ -286,8 +327,7 @@ public class ScapestackSyncPluginTest {
         snapshot.bankStatus = new GameStateReader.BankStatus(true, 1, "2026-07-08T10:00:00Z", null);
 
         assertEquals(
-            "Scapestack planner updated for Lynx Titan: 24 skills, 180 quests, 44 diaries, 612 CL items, bank synced: 900 item stacks, no Slayer state. "
-                + "Open Scapestack /next for your session board.",
+            "ScapeStack synced your bank.",
             ScapestackSyncPlugin.buildSyncSuccessMessage(
                 "Lynx Titan",
                 snapshot,
@@ -304,8 +344,7 @@ public class ScapestackSyncPluginTest {
         snapshot.bankStatus = new GameStateReader.BankStatus(true, 0, null, "bank-not-opened-this-session");
 
         assertEquals(
-            "Scapestack planner updated for Lynx Titan: 0 skills, 0 quests, 0 diaries, 0 CL items from loaded CL tabs, bank not opened this session, no Slayer state. "
-                + "Open your bank, then sync again for item checks.",
+            "Open your bank once, then sync again.",
             ScapestackSyncPlugin.buildSyncSuccessMessage(
                 "Lynx Titan",
                 snapshot,
@@ -387,8 +426,9 @@ public class ScapestackSyncPluginTest {
 
     @Test
     public void optInHintNamesTheSafePayloadScope() {
-        assertTrue(ScapestackSyncPlugin.optInHintMessage().contains("verified skills, quests, diaries, CL and Slayer"));
-        assertTrue(ScapestackSyncPlugin.optInHintMessage().contains("Turn on bank readiness separately"));
+        assertTrue(ScapestackSyncPlugin.optInHintMessage().contains("ScapeStack is ready"));
+        assertTrue(ScapestackSyncPlugin.optInHintMessage().contains("Sync on login"));
+        assertNoPlayerTech(ScapestackSyncPlugin.optInHintMessage());
     }
 
     @Test
@@ -438,20 +478,66 @@ public class ScapestackSyncPluginTest {
     @Test
     public void recoveryMessagesGiveActionableNextSteps() {
         assertEquals(
-            "Scapestack needs reconnect: Token does not match RSN claim. Use Reconnect player, then Sync now.",
+            "ScapeStack needs reconnect. Press Reconnect player, then Sync now.",
             ScapestackSyncPlugin.recoveryMessageForHttpFailure(403, "Token does not match RSN claim")
         );
         assertEquals(
-            "Scapestack is temporarily unavailable. Try again later.",
+            "ScapeStack is temporarily unavailable. Try again later.",
             ScapestackSyncPlugin.recoveryMessageForHttpFailure(500, "Database unavailable")
         );
         assertEquals(
-            "Scapestack is rate limiting syncs. Wait a moment, then Sync now.",
+            "ScapeStack is busy. Wait a moment, then Sync now.",
             ScapestackSyncPlugin.recoveryMessageForHttpFailure(429, "Too many requests")
         );
         assertEquals(
-            "Scapestack needs attention: Bad payload.",
+            "ScapeStack could not sync. Open troubleshooting in the plugin panel.",
             ScapestackSyncPlugin.recoveryMessageForHttpFailure(400, "Bad payload")
+        );
+        assertNoPlayerTech(ScapestackSyncPlugin.recoveryMessageForHttpFailure(403, "Token does not match RSN claim"));
+        assertNoPlayerTech(ScapestackSyncPlugin.recoveryMessageForHttpFailure(400, "Bad payload"));
+    }
+
+    @Test
+    public void panelNextActionUsesPlayerInstructions() {
+        assertEquals(
+            "Open your bank once, then sync again",
+            ScapestackSyncPlugin.panelNextAction(
+                new GameStateReader.BankStatus(true, 0, null, "bank-not-opened-this-session"),
+                new CollectionLogReader.Status(true, 1, 100, 0),
+                "Synced"
+            )
+        );
+        assertEquals(
+            "Open Collection Log once, then sync again",
+            ScapestackSyncPlugin.panelNextAction(
+                new GameStateReader.BankStatus(false, 0, null, "opt-in-off"),
+                CollectionLogReader.Status.notOpened(),
+                "Synced"
+            )
+        );
+        assertEquals(
+            "Click a Collection Log category, then sync again",
+            ScapestackSyncPlugin.panelNextAction(
+                new GameStateReader.BankStatus(false, 0, null, "opt-in-off"),
+                new CollectionLogReader.Status(true, 1, 0, 0),
+                "Synced"
+            )
+        );
+        assertEquals(
+            "Open next trip in ScapeStack",
+            ScapestackSyncPlugin.panelNextAction(
+                new GameStateReader.BankStatus(true, 42, "2026-07-09T10:00:00Z", null),
+                new CollectionLogReader.Status(true, 1, 100, 5),
+                "Synced"
+            )
+        );
+        assertEquals(
+            "Open your bank for item checks",
+            ScapestackSyncPlugin.panelNextAction(
+                new GameStateReader.BankStatus(true, 0, null, null),
+                new CollectionLogReader.Status(true, 1, 100, 5),
+                "Synced"
+            )
         );
     }
 
@@ -490,6 +576,17 @@ public class ScapestackSyncPluginTest {
         event.setKey(key);
         event.setNewValue(newValue);
         return event;
+    }
+
+    private static void assertNoPlayerTech(String message) {
+        String lower = message.toLowerCase();
+        assertFalse(lower.contains("http"));
+        assertFalse(lower.contains("url"));
+        assertFalse(lower.contains("endpoint"));
+        assertFalse(lower.contains("payload"));
+        assertFalse(lower.contains("status code"));
+        assertFalse(lower.contains("cl "));
+        assertFalse(lower.contains("/next"));
     }
 
     private static final class RecordingCall implements Call {

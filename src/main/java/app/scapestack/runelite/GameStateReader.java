@@ -212,7 +212,7 @@ public class GameStateReader {
         return readSnapshot(client, collectionLogItemIds, collectionLogStatus, false);
     }
 
-    /** Full snapshot path used by the plugin. Bank sync is a separate opt-in
+    /** Full snapshot path used by the plugin. Bank sync can be turned off
      *  because it can expose wealth/gear. Inventory and equipment are never
      *  read by this plugin. */
     public Snapshot readSnapshot(Client client, List<Integer> collectionLogItemIds, boolean includeBankItems) {

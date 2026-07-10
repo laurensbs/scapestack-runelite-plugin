@@ -7,7 +7,9 @@ and Slayer coverage from a verified RuneLite payload instead of only
 hiscores heuristics.
 
 The plugin does not POST progress by default. Enable `Sync on login`
-in RuneLite settings to send login snapshots; optionally enable
+in RuneLite settings to send login snapshots. Bank readiness is included by default
+with item IDs/names/quantities when your bank has been opened; turn off
+`Use bank for readiness` if you only want progress sync. Optionally enable
 `Refresh after quests` for immediate quest refreshes.
 Use `Sync now` when you want to refresh the planner on demand; the toggle
 resets automatically after the sync starts.
@@ -25,10 +27,11 @@ the log was not opened, opened without item slots, or loaded correctly.
 ## Data contract
 
 Sent after opt-in: RSN, plugin version, quest and diary completion,
-loaded collection-log item IDs, Slayer state, and the local install token
-only as the Authorization bearer on claim/sync requests.
+loaded collection-log item IDs, Slayer state, bank item IDs/names/quantities
+when bank checks are on, and the local install token only as the Authorization
+bearer on claim/sync requests.
 
-Never sent: RuneScape password, bank, inventory, equipment, GE offers, chat,
+Never sent: RuneScape password, inventory, equipment, GE offers, chat,
 friends list, clicks, key presses, screenshots, local files, or RuneLite
 config folders, IP address, or machine fingerprint.
 

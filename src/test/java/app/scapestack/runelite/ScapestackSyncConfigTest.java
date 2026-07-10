@@ -12,7 +12,7 @@ public class ScapestackSyncConfigTest {
     public void defaultsRequireExplicitSyncOptIn() {
         assertFalse(config.syncNow());
         assertFalse(config.autoSync());
-        assertFalse(config.syncBankItems());
+        assertTrue(config.syncBankItems());
         assertFalse(config.syncOnQuestComplete());
         assertFalse(config.forceClaimOnNextSync());
         assertTrue(config.chatFeedback());
@@ -37,13 +37,17 @@ public class ScapestackSyncConfigTest {
             .getAnnotation(ConfigItem.class)
             .description();
 
-        assertTrue(syncNowDescription.contains("Send a planner snapshot now"));
-        assertTrue(syncNowDescription.contains("Resets automatically"));
-        assertTrue(autoSyncDescription.contains("account type, quests, skills, diaries, collection-log IDs and Slayer state"));
-        assertTrue(autoSyncDescription.contains("Bank readiness stays separate"));
-        assertTrue(bankSyncDescription.contains("bank item IDs, names and quantities"));
-        assertTrue(bankSyncDescription.contains("Never sends inventory, equipment, chat, screenshots or account login"));
+        assertTrue(syncNowDescription.contains("Refresh your ScapeStack planner now"));
+        assertTrue(autoSyncDescription.contains("account mode, skills, quests, diaries, Slayer task and bank readiness"));
+        assertTrue(bankSyncDescription.contains("Includes bank item names, IDs and quantities"));
+        assertTrue(bankSyncDescription.contains("Turn off if you only want progress sync"));
+        assertTrue(bankSyncDescription.contains("Never sends inventory, equipment, chat, screenshots or login details"));
         assertTrue(questSyncDescription.contains("Requires Sync on login"));
+
+        assertNoNormalUserTech(syncNowDescription);
+        assertNoNormalUserTech(autoSyncDescription);
+        assertNoNormalUserTech(bankSyncDescription);
+        assertNoNormalUserTech(questSyncDescription);
     }
 
     @Test
@@ -55,5 +59,13 @@ public class ScapestackSyncConfigTest {
             assertFalse(item.name().toLowerCase().contains("endpoint"));
             assertFalse(item.description().toLowerCase().contains("self-hosting"));
         }
+    }
+
+    private static void assertNoNormalUserTech(String copy) {
+        String lower = copy.toLowerCase();
+        assertFalse(lower.contains("url"));
+        assertFalse(lower.contains("endpoint"));
+        assertFalse(lower.contains("payload"));
+        assertFalse(lower.contains("http"));
     }
 }

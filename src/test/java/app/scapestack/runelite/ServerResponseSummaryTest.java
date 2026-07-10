@@ -56,4 +56,17 @@ public class ServerResponseSummaryTest {
         assertEquals(null, ServerResponseSummary.acceptedCounts("{\"ok\":true}"));
         assertEquals(null, ServerResponseSummary.acceptedCounts("not json"));
     }
+
+    @Test
+    public void detectsNewProgressFromSyncSummary() {
+        assertEquals(
+            true,
+            ServerResponseSummary.hasNewProgress("{\"ok\":true,\"syncSummary\":{\"questsCompleted\":[\"Biohazard\"],\"diariesCompleted\":[],\"collectionLogItemIds\":[]}}")
+        );
+        assertEquals(
+            false,
+            ServerResponseSummary.hasNewProgress("{\"ok\":true,\"syncSummary\":null}")
+        );
+        assertEquals(false, ServerResponseSummary.hasNewProgress("not json"));
+    }
 }

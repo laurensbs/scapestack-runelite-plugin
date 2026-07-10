@@ -10,7 +10,7 @@ public interface ScapestackSyncConfig extends Config {
     @ConfigItem(
         keyName = "syncNow",
         name = "Sync now",
-        description = "Send a planner snapshot now. Resets automatically after the sync starts."
+        description = "Refresh your ScapeStack planner now."
     )
     default boolean syncNow() {
         return false;
@@ -19,7 +19,7 @@ public interface ScapestackSyncConfig extends Config {
     @ConfigItem(
         keyName = "autoSync",
         name = "Sync on login",
-        description = "Updates your Scapestack session planner with account type, quests, skills, diaries, collection-log IDs and Slayer state. Bank readiness stays separate."
+        description = "Keeps your planner current with account mode, skills, quests, diaries, Slayer task and bank readiness."
     )
     default boolean autoSync() {
         return false;
@@ -28,16 +28,16 @@ public interface ScapestackSyncConfig extends Config {
     @ConfigItem(
         keyName = "syncBankItems",
         name = "Use bank for readiness",
-        description = "Adds bank item IDs, names and quantities so quests and diaries can show ready/missing item checks. Never sends inventory, equipment, chat, screenshots or account login."
+        description = "Includes bank item names, IDs and quantities for trip readiness. Turn off if you only want progress sync. Never sends inventory, equipment, chat, screenshots or login details."
     )
     default boolean syncBankItems() {
-        return false;
+        return true;
     }
 
     @ConfigItem(
         keyName = "syncOnQuestComplete",
         name = "Refresh after quests",
-        description = "Updates Scapestack right after a quest completion. Requires Sync on login to be enabled."
+        description = "Refreshes ScapeStack after a quest completion. Requires Sync on login."
     )
     default boolean syncOnQuestComplete() {
         return false;
@@ -46,7 +46,7 @@ public interface ScapestackSyncConfig extends Config {
     @ConfigItem(
         keyName = "forceClaimOnNextSync",
         name = "Reconnect player",
-        description = "Forget the local claimed-RSN cache and reconnect this RuneLite install on the next sync. Use after changing RSN or fixing a rejected claim."
+        description = "Reconnect this RuneLite install to your current player. Use this after changing RSN."
     )
     default boolean forceClaimOnNextSync() {
         return false;
@@ -55,7 +55,7 @@ public interface ScapestackSyncConfig extends Config {
     @ConfigItem(
         keyName = "chatFeedback",
         name = "Compact chat updates",
-        description = "Show short RuneLite chat updates when Scapestack starts, completes or needs attention."
+        description = "Show short RuneLite chat updates when ScapeStack checks your progress or needs attention."
     )
     default boolean chatFeedback() {
         return true;
