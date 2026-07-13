@@ -435,19 +435,19 @@ public class ScapestackSyncPluginTest {
     public void configuredSyncUrlDefaultsToOfficialEndpoint() {
         assertEquals(
             "https://www.scapestack.org/api/sync",
-            ScapestackSyncPlugin.configuredSyncUrl(null, null)
+            ScapestackSyncPlugin.configuredSyncUrl(null)
         );
     }
 
     @Test
-    public void configuredSyncUrlAllowsHiddenDevOverride() {
+    public void configuredSyncUrlAllowsHiddenJvmPropertyDevOverride() {
         assertEquals(
             "http://127.0.0.1:4173/api/sync",
-            ScapestackSyncPlugin.configuredSyncUrl(" http://127.0.0.1:4173/api/sync/claim?debug=1 ", null)
+            ScapestackSyncPlugin.configuredSyncUrl(" http://127.0.0.1:4173/api/sync/claim?debug=1 ")
         );
         assertEquals(
-            "http://localhost:4173/api/sync",
-            ScapestackSyncPlugin.configuredSyncUrl("", "http://localhost:4173/api/sync")
+            "https://www.scapestack.org/api/sync",
+            ScapestackSyncPlugin.configuredSyncUrl("")
         );
     }
 
@@ -455,7 +455,7 @@ public class ScapestackSyncPluginTest {
     public void configuredSyncUrlRejectsInvalidHiddenOverride() {
         assertEquals(
             "https://www.scapestack.org/api/sync",
-            ScapestackSyncPlugin.configuredSyncUrl("ftp://example.com/api/sync", null)
+            ScapestackSyncPlugin.configuredSyncUrl("ftp://example.com/api/sync")
         );
     }
 

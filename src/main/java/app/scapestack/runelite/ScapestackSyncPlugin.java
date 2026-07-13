@@ -99,7 +99,6 @@ public class ScapestackSyncPlugin extends Plugin {
     private static final String KEY_FORCE_CLAIM = "forceClaimOnNextSync";
     private static final String DEFAULT_SYNC_URL = "https://www.scapestack.org/api/sync";
     private static final String DEV_SYNC_URL_PROPERTY = "scapestack.syncUrl";
-    private static final String DEV_SYNC_URL_ENV = "SCAPESTACK_SYNC_URL";
 
     private ClaimClient claimClient;
     private SyncServiceReadiness syncServiceReadiness;
@@ -639,18 +638,12 @@ public class ScapestackSyncPlugin extends Plugin {
     }
 
     private static String configuredSyncUrl() {
-        return configuredSyncUrl(
-            System.getProperty(DEV_SYNC_URL_PROPERTY),
-            System.getenv(DEV_SYNC_URL_ENV)
-        );
+        return configuredSyncUrl(System.getProperty(DEV_SYNC_URL_PROPERTY));
     }
 
-    static String configuredSyncUrl(String propertyOverride, String envOverride) {
-        String override = propertyOverride != null && !propertyOverride.isBlank()
-            ? propertyOverride
-            : envOverride;
-        String candidate = override != null && !override.isBlank()
-            ? ClaimClient.normalizeSyncUrl(override)
+    static String configuredSyncUrl(String propertyOverride) {
+        String candidate = propertyOverride != null && !propertyOverride.isBlank()
+            ? ClaimClient.normalizeSyncUrl(propertyOverride)
             : DEFAULT_SYNC_URL;
         if (!ClaimClient.isHttpSyncUrl(candidate)) {
             return DEFAULT_SYNC_URL;

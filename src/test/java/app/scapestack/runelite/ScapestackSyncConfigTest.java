@@ -3,6 +3,10 @@ package app.scapestack.runelite;
 import net.runelite.client.config.ConfigItem;
 import org.junit.Test;
 
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+
 import static org.junit.Assert.*;
 
 public class ScapestackSyncConfigTest {
@@ -66,6 +70,18 @@ public class ScapestackSyncConfigTest {
             assertFalse(item.name().toLowerCase().contains("endpoint"));
             assertFalse(item.description().toLowerCase().contains("self-hosting"));
         }
+    }
+
+    @Test
+    public void hiddenDevOverrideUsesJvmPropertyOnly() throws Exception {
+        String source = Files.readString(
+            Path.of("src/main/java/app/scapestack/runelite/ScapestackSyncPlugin.java"),
+            StandardCharsets.UTF_8
+        );
+
+        assertTrue(source.contains("System.getProperty(DEV_SYNC_URL_PROPERTY)"));
+        assertFalse(source.contains("System.getenv"));
+        assertFalse(source.contains("SCAPESTACK_SYNC_URL"));
     }
 
     private static void assertNoNormalUserTech(String copy) {
