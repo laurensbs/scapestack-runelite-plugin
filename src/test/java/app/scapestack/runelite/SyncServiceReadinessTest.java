@@ -11,7 +11,7 @@ public class SyncServiceReadinessTest {
     @Test
     public void proceedsWhenServiceReportsReady() {
         SyncServiceReadiness.Result result = SyncServiceReadiness.parse(
-            "{\"ready\":true,\"plugin\":{\"currentVersion\":\"0.2.0\"}}"
+            "{\"ready\":true,\"plugin\":{\"currentVersion\":\"0.3.0\"}}"
         );
 
         assertTrue(result.proceed);

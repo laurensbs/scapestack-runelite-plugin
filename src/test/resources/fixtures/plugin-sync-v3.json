@@ -1,0 +1,115 @@
+{
+  "rsn": "Iron Lynx",
+  "displayName": "Iron Lynx",
+  "pluginVersion": "0.3.0",
+  "contractVersion": 3,
+  "capturedAt": "2026-07-18T12:34:56Z",
+  "coverage": {
+    "skills": {
+      "state": "available",
+      "capturedAt": "2026-07-18T12:34:56Z"
+    },
+    "quests": {
+      "state": "available",
+      "capturedAt": "2026-07-18T12:34:56Z"
+    },
+    "diaries": {
+      "state": "available",
+      "capturedAt": "2026-07-18T12:34:56Z"
+    },
+    "collectionLog": {
+      "state": "available",
+      "capturedAt": "2026-07-18T12:30:00Z",
+      "reason": "loaded-categories-only"
+    },
+    "bossKc": {
+      "state": "available",
+      "capturedAt": "2026-07-18T12:32:00Z",
+      "reason": "runelite-killcount-cache-observed-only"
+    },
+    "slayer": {
+      "state": "available",
+      "capturedAt": "2026-07-18T12:34:56Z"
+    },
+    "accountMode": {
+      "state": "available",
+      "capturedAt": "2026-07-18T12:34:56Z"
+    },
+    "bank": {
+      "state": "available",
+      "capturedAt": "2026-07-18T12:31:00Z"
+    }
+  },
+  "accountType": "ironman",
+  "questsCompleted": [
+    "Cook\u0027s Assistant",
+    "Dragon Slayer I"
+  ],
+  "skills": [
+    {
+      "name": "Agility",
+      "level": 35,
+      "xp": 22406
+    },
+    {
+      "name": "Ranged",
+      "level": 70,
+      "xp": 737627
+    }
+  ],
+  "diariesCompleted": [
+    {
+      "region": "Karamja",
+      "tier": "Easy"
+    }
+  ],
+  "collectionLogItemIds": [
+    11785,
+    11787,
+    12922
+  ],
+  "collectionLogStatus": {
+    "opened": true,
+    "widgetLoads": 2,
+    "lastWidgetItemCount": 100,
+    "obtainedItemCount": 3,
+    "capturedAt": "2026-07-18T12:30:00Z"
+  },
+  "bossKc": {
+    "Vorkath": 48,
+    "Zulrah": 0
+  },
+  "bankItems": [
+    {
+      "id": 1511,
+      "name": "Logs",
+      "quantity": 6
+    },
+    {
+      "id": 2351,
+      "name": "Iron bar",
+      "quantity": 5
+    }
+  ],
+  "bankStatus": {
+    "enabled": true,
+    "itemCount": 2,
+    "capturedAt": "2026-07-18T12:31:00Z"
+  },
+  "slayer": {
+    "points": 132,
+    "streak": 51,
+    "taskRemaining": 47,
+    "currentTaskId": 19,
+    "taskName": "Dust devils",
+    "taskLocation": "Catacombs of Kourend",
+    "blocks": [
+      1,
+      2
+    ],
+    "blockNames": [
+      "Banshees",
+      "Black demons"
+    ]
+  }
+}

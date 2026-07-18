@@ -20,7 +20,7 @@ public interface ScapestackSyncConfig extends Config {
     @ConfigItem(
         keyName = "autoSync",
         name = "Sync on login",
-        description = "Keeps your planner current with account mode, skills, quests, diaries, Slayer task and bank readiness."
+        description = "Keeps your planner current with account mode, skills, XP, quests, diaries, boss KC RuneLite has seen, Slayer task and bank items."
     )
     default boolean autoSync() {
         return false;
@@ -41,8 +41,8 @@ public interface ScapestackSyncConfig extends Config {
 
     @ConfigItem(
         keyName = "syncBankItems",
-        name = "Use bank for readiness",
-        description = "Includes bank item names, IDs and quantities for trip readiness. Turn off if you only want progress sync. Never sends inventory, equipment, chat, screenshots or login details."
+        name = "Use bank for trips",
+        description = "Includes bank item names, IDs and quantities for gear and supplies. Turn off if you only want progress sync. Never sends inventory, equipment, chat, screenshots or login details."
     )
     default boolean syncBankItems() {
         return true;

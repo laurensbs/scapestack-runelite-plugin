@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.widgets.Widget;
 
 import javax.inject.Singleton;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -38,11 +39,13 @@ public class CollectionLogReader {
     private final Set<Integer> obtainedItemIds = new HashSet<>();
     private int widgetLoadCount;
     private int lastWidgetItemCount;
+    private String lastCapturedAt;
 
     public synchronized void reset() {
         obtainedItemIds.clear();
         widgetLoadCount = 0;
         lastWidgetItemCount = 0;
+        lastCapturedAt = null;
     }
 
     public synchronized List<Integer> snapshot() {
@@ -54,7 +57,8 @@ public class CollectionLogReader {
             widgetLoadCount > 0,
             widgetLoadCount,
             lastWidgetItemCount,
-            obtainedItemIds.size()
+            obtainedItemIds.size(),
+            lastCapturedAt
         );
     }
 
@@ -72,6 +76,7 @@ public class CollectionLogReader {
         if (rootWidget == null) return 0;
         widgetLoadCount++;
         lastWidgetItemCount = countItemWidgets(rootWidget);
+        lastCapturedAt = Instant.now().toString();
         return extractInto(rootWidget, obtainedItemIds);
     }
 
@@ -140,7 +145,8 @@ public class CollectionLogReader {
             root != null,
             root == null ? 0 : 1,
             countMockItemWidgets(root),
-            extractFromMock(root).size()
+            extractFromMock(root).size(),
+            root == null ? null : Instant.now().toString()
         );
     }
 
@@ -199,16 +205,22 @@ public class CollectionLogReader {
         public final int widgetLoads;
         public final int lastWidgetItemCount;
         public final int obtainedItemCount;
+        public final String capturedAt;
 
         public Status(boolean opened, int widgetLoads, int lastWidgetItemCount, int obtainedItemCount) {
+            this(opened, widgetLoads, lastWidgetItemCount, obtainedItemCount, null);
+        }
+
+        public Status(boolean opened, int widgetLoads, int lastWidgetItemCount, int obtainedItemCount, String capturedAt) {
             this.opened = opened;
             this.widgetLoads = widgetLoads;
             this.lastWidgetItemCount = lastWidgetItemCount;
             this.obtainedItemCount = obtainedItemCount;
+            this.capturedAt = capturedAt;
         }
 
         public static Status notOpened() {
-            return new Status(false, 0, 0, 0);
+            return new Status(false, 0, 0, 0, null);
         }
 
         public boolean hasLoadedItemSlots() {

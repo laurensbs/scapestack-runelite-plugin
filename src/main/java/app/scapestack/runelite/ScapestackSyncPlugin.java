@@ -33,6 +33,7 @@ import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.net.URI;
 import java.net.URLEncoder;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.Executors;
@@ -41,7 +42,7 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * Scapestack Sync — reads the player's quest list, diary completion state,
- * collection log and Slayer state out of the running game client and POSTs
+ * collection log, observed boss KC and Slayer state out of the running game client and POSTs
  * them to www.scapestack.org/api/sync.
  *
  * Triggers:
@@ -54,6 +55,8 @@ import java.util.concurrent.TimeUnit;
  *   - Collection log: cl.net plugin already does this, but they require
  *     a separate upload step. We integrate it so one plugin gives
  *     Scapestack everything.
+ *   - Boss KC: only counts RuneLite has already observed are included;
+ *     missing cache entries remain unknown rather than becoming zero.
  *   - Slayer: current task, points, streak and blocks are session state;
  *     public trackers cannot reliably infer today's assignment.
  *
@@ -101,6 +104,7 @@ public class ScapestackSyncPlugin extends Plugin {
     private static final String DEV_SYNC_URL_PROPERTY = "scapestack.syncUrl";
 
     private ClaimClient claimClient;
+    private PairingClient pairingClient;
     private SyncServiceReadiness syncServiceReadiness;
     private final SyncGate syncGate = new SyncGate();
     private boolean optInHintShown;
@@ -112,7 +116,7 @@ public class ScapestackSyncPlugin extends Plugin {
     private ScapestackSyncPanel panel;
     private NavigationButton navigationButton;
     private static final MediaType JSON = MediaType.parse("application/json");
-    private static final String PLUGIN_VERSION = "0.2.0";
+    private static final String PLUGIN_VERSION = "0.3.0";
     private static final String USER_AGENT = "scapestack-plugin/" + PLUGIN_VERSION;
     private static final String OPT_IN_HINT = "ScapeStack is ready. Turn on Sync on login to keep your planner updated.";
     private static final long MANUAL_SYNC_COOLDOWN_MS = 2_500L;
@@ -125,6 +129,7 @@ public class ScapestackSyncPlugin extends Plugin {
         // Wire up the claim-helper here (rather than as a final field)
         // because Guice fills @Inject fields after construction.
         claimClient = new ClaimClient(http);
+        pairingClient = new PairingClient(http);
         syncServiceReadiness = new SyncServiceReadiness(http);
         running = true;
         migrateLegacySyncUrl();
@@ -415,7 +420,8 @@ public class ScapestackSyncPlugin extends Plugin {
         panel = new ScapestackSyncPanel(
             config,
             configManager,
-            this::requestPanelSync
+            this::requestPanelSync,
+            this::requestBrowserPairing
         );
         navigationButton = NavigationButton.builder()
             .tooltip("ScapeStack Sync")
@@ -442,6 +448,38 @@ public class ScapestackSyncPlugin extends Plugin {
     private void requestPanelSync() {
         configManager.setConfiguration(CONFIG_GROUP, KEY_SYNC_NOW, true);
         updatePanelStatus("Sync requested");
+    }
+
+    private void requestBrowserPairing(String code) {
+        String rsn = client.getLocalPlayer() != null ? client.getLocalPlayer().getName() : null;
+        if (rsn == null || rsn.isBlank() || client.getGameState() != GameState.LOGGED_IN) {
+            updatePanelStatus("Log in to connect");
+            notifyChat("Log in, then connect this browser again.");
+            return;
+        }
+        updatePanelStatus("Connecting browser");
+        Thread thread = newSyncThread(() -> {
+            String syncUrl = configuredSyncUrl();
+            String token = InstallToken.getOrCreate(configManager);
+            String claimedRsn = InstallToken.claimedRsn(configManager);
+            if (claimedRsn == null || !claimedRsn.equalsIgnoreCase(rsn)) {
+                String claimUrl = ClaimClient.claimUrlFromSyncUrl(syncUrl);
+                if (!claimClient.claim(claimUrl, rsn, token, USER_AGENT)) {
+                    updatePanelStatus("Sync player first");
+                    notifyChat("Sync this player once, then connect the browser again.");
+                    return;
+                }
+                InstallToken.rememberClaimedRsn(configManager, rsn);
+            }
+            if (pairingClient.approve(syncUrl, rsn, code, token, USER_AGENT)) {
+                updatePanelStatus("Browser connected");
+                notifyChat("ScapeStack connected this browser to " + rsn + ".");
+            } else {
+                updatePanelStatus("Code expired");
+                notifyChat("That connection code expired. Create a new one on Scapestack.");
+            }
+        });
+        thread.start();
     }
 
     private void updatePanelStatus(String status) {
@@ -656,6 +694,9 @@ public class ScapestackSyncPlugin extends Plugin {
         body.addProperty("rsn", rsn);
         body.addProperty("displayName", rsn);
         body.addProperty("pluginVersion", PLUGIN_VERSION);
+        body.addProperty("contractVersion", PluginSnapshotContract.VERSION);
+        body.addProperty("capturedAt", snap.capturedAt);
+        body.add("coverage", PluginSnapshotContract.coverageJson(snap));
         body.addProperty("accountType", snap.accountType != null && !snap.accountType.isBlank() ? snap.accountType : "normal");
         body.add("questsCompleted", gson.toJsonTree(snap.questsCompleted));
         JsonArray skills = new JsonArray();
@@ -663,6 +704,7 @@ public class ScapestackSyncPlugin extends Plugin {
             JsonObject row = new JsonObject();
             row.addProperty("name", s.name);
             row.addProperty("level", s.level);
+            row.addProperty("xp", s.xp);
             skills.add(row);
         }
         body.add("skills", skills);
@@ -682,6 +724,12 @@ public class ScapestackSyncPlugin extends Plugin {
         collectionLogStatusJson.addProperty("lastWidgetItemCount", collectionLogStatus.lastWidgetItemCount);
         collectionLogStatusJson.addProperty("obtainedItemCount", collectionLogStatus.obtainedItemCount);
         body.add("collectionLogStatus", collectionLogStatusJson);
+        if (collectionLogStatus.capturedAt != null && !collectionLogStatus.capturedAt.isBlank()) {
+            collectionLogStatusJson.addProperty("capturedAt", collectionLogStatus.capturedAt);
+        }
+        if (snap.bossKc != null) {
+            body.add("bossKc", gson.toJsonTree(snap.bossKc));
+        }
         if (snap.bankItems != null && !snap.bankItems.isEmpty()) {
             JsonArray bankItems = new JsonArray();
             for (GameStateReader.BankItem item : snap.bankItems) {
@@ -711,7 +759,14 @@ public class ScapestackSyncPlugin extends Plugin {
             slayer.addProperty("streak", snap.slayer.streak);
             slayer.addProperty("taskRemaining", snap.slayer.taskRemaining);
             slayer.addProperty("currentTaskId", snap.slayer.currentTaskId);
+            if (snap.slayer.taskName != null && !snap.slayer.taskName.isBlank()) {
+                slayer.addProperty("taskName", snap.slayer.taskName);
+            }
+            if (snap.slayer.taskLocation != null && !snap.slayer.taskLocation.isBlank()) {
+                slayer.addProperty("taskLocation", snap.slayer.taskLocation);
+            }
             slayer.add("blocks", gson.toJsonTree(snap.slayer.blocks));
+            slayer.add("blockNames", gson.toJsonTree(new ArrayList<>(snap.slayer.blockNames)));
             body.add("slayer", slayer);
         }
         return body;
@@ -782,7 +837,7 @@ public class ScapestackSyncPlugin extends Plugin {
             return "Bank synced: " + formatCount(status.itemCount, "item stack", "item stacks");
         }
         if (!status.enabled) {
-            return "Bank checks off";
+            return "Bank off";
         }
         if ("bank-not-opened-this-session".equals(status.unavailableReason)) {
             return "Open your bank once";

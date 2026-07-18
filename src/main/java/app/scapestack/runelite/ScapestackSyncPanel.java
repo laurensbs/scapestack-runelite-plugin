@@ -9,6 +9,7 @@ import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
+import javax.swing.JTextField;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.border.EmptyBorder;
@@ -20,6 +21,7 @@ import java.awt.Font;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
+import java.util.function.Consumer;
 
 final class ScapestackSyncPanel extends PluginPanel {
     private static final Color BG = new Color(31, 25, 16);
@@ -32,27 +34,30 @@ final class ScapestackSyncPanel extends PluginPanel {
     private final ScapestackSyncConfig config;
     private final ConfigManager configManager;
     private final Runnable syncNow;
+    private final Consumer<String> connectBrowser;
 
     private final JLabel statusValue = valueLabel("Ready");
     private final JLabel lastSyncValue = valueLabel("Not synced yet");
     private final JLabel autoRefreshValue = valueLabel("Off");
     private final JLabel accountModeValue = valueLabel("Account mode unknown");
     private final JLabel playerValue = valueLabel("Log in to detect");
-    private final JLabel bankValue = valueLabel("Bank checks off");
+    private final JLabel bankValue = valueLabel("Bank off");
     private final JLabel nextActionValue = valueLabel("Press Sync now");
     private final JLabel collectionLogValue = valueLabel("");
-    private final JButton bankToggle = primaryButton("Use bank checks");
+    private final JButton bankToggle = primaryButton("Use bank");
     private final JPanel collectionLogRow = row("Collection Log", collectionLogValue);
     private final JPanel troubleshootingBody = card();
 
     ScapestackSyncPanel(
         ScapestackSyncConfig config,
         ConfigManager configManager,
-        Runnable syncNow
+        Runnable syncNow,
+        Consumer<String> connectBrowser
     ) {
         this.config = config;
         this.configManager = configManager;
         this.syncNow = syncNow;
+        this.connectBrowser = connectBrowser;
 
         setLayout(new BorderLayout());
         setBackground(BG);
@@ -65,6 +70,8 @@ final class ScapestackSyncPanel extends PluginPanel {
         content.add(header());
         content.add(Box.createVerticalStrut(10));
         content.add(syncCard());
+        content.add(Box.createVerticalStrut(10));
+        content.add(connectBrowserCard());
         content.add(Box.createVerticalStrut(10));
         content.add(whatSyncsCard());
         content.add(Box.createVerticalStrut(10));
@@ -124,7 +131,7 @@ final class ScapestackSyncPanel extends PluginPanel {
 
     void refresh() {
         SwingUtilities.invokeLater(() -> {
-            bankToggle.setText(config.syncBankItems() ? "Bank checks on" : "Bank checks off");
+            bankToggle.setText(config.syncBankItems() ? "Bank on" : "Bank off");
             autoRefreshValue.setText(config.autoSync()
                 ? "Every " + ScapestackSyncPlugin.normalizedAutoSyncIntervalMinutes(config.autoSyncIntervalMinutes()) + " min"
                 : "Off");
@@ -181,9 +188,9 @@ final class ScapestackSyncPanel extends PluginPanel {
         panel.add(row("Status", statusValue));
         panel.add(row("Player", playerValue));
         panel.add(row("Account mode", accountModeValue));
-        panel.add(row("Last sync", lastSyncValue));
-        panel.add(row("Auto refresh", autoRefreshValue));
-        panel.add(row("Bank checks", bankValue));
+        panel.add(row("Last update", lastSyncValue));
+        panel.add(row("Auto update", autoRefreshValue));
+        panel.add(row("Bank", bankValue));
         panel.add(row("Next action", nextActionValue));
         collectionLogRow.setVisible(false);
         panel.add(collectionLogRow);
@@ -198,10 +205,40 @@ final class ScapestackSyncPanel extends PluginPanel {
 
     private JPanel whatSyncsCard() {
         JPanel panel = card();
-        panel.add(sectionTitle("Planner checks"));
-        panel.add(copy("Skills, quests, diaries, Slayer task and bank readiness."));
-        panel.add(copy("Recommended sync refreshes after login and then every 15 minutes while you play."));
-        panel.add(copy("Turn bank checks off if you only want progress sync."));
+        panel.add(sectionTitle("Planner fuel"));
+        panel.add(copy("Skills, XP, quests, diaries, boss KC RuneLite has seen, Slayer task and bank items."));
+        panel.add(copy("Auto update refreshes after login and then every 15 minutes while you play."));
+        panel.add(copy("Turn bank off if you only want finished-progress checks."));
+        return panel;
+    }
+
+    private JPanel connectBrowserCard() {
+        JPanel panel = card();
+        panel.add(sectionTitle("Connect this browser"));
+        panel.add(copy("Get a code on Scapestack, enter it here, then continue on that browser."));
+        panel.add(Box.createVerticalStrut(6));
+        JTextField code = new JTextField();
+        code.setToolTipText("Scapestack connection code");
+        code.setMaximumSize(new Dimension(Integer.MAX_VALUE, 32));
+        code.setBackground(BG);
+        code.setForeground(TEXT);
+        code.setCaretColor(GOLD);
+        code.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(BORDER),
+            new EmptyBorder(6, 8, 6, 8)
+        ));
+        panel.add(code);
+        panel.add(Box.createVerticalStrut(6));
+        JButton approve = primaryButton("Connect browser");
+        approve.addActionListener(e -> {
+            String value = code.getText();
+            if (PairingClient.normalizeCode(value).length() != 8) {
+                setStatus("Enter the 8-character code");
+                return;
+            }
+            connectBrowser.accept(value);
+        });
+        panel.add(approve);
         return panel;
     }
 

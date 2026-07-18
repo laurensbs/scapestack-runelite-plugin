@@ -1,125 +1,151 @@
 # Publishing Scapestack Sync to the RuneLite Plugin Hub
 
-The Hub only accepts plugins that live in their own GitHub repo (one
-plugin per repo). This monorepo holds the canonical source; we extract
-a publish-ready copy to a sibling repo with `extract-plugin.sh`.
+The Plugin Hub builds one immutable commit from the standalone repository. The
+monorepo is the source tree, but `plugin/release-manifest.json` is the release
+authority.
 
-## One-time: create the GitHub repo
+That manifest deliberately separates:
 
-1. On github.com, create `laurensbs/scapestack-runelite-plugin` (empty,
-   no README, no license — the extract script seeds those).
-2. Note the SSH URL; you'll pass it to the extract script.
+- `candidate`: what the monorepo and website are being prepared to support;
+- `published`: the version and full source commit currently pinned by Plugin
+  Hub master;
+- `reviewPullRequest`: historical review context only. An old PR is never used
+  to decide what RuneLite currently installs.
 
-## Each release
+Do not publish candidate `0.3.0` until REC-02 completes and verifies the full
+snapshot contract. REC-01 only makes the handoff truthful and reproducible.
 
-From the monorepo root:
+## Reproducible RuneLite resolution
+
+Current official Plugin Hub guidance expects `latest.release` for RuneLite
+client compatibility. `plugin/build.gradle` therefore keeps that selector, but
+all resolved dependencies are committed in `plugin/gradle.lockfile`. The
+manifest records the RuneLite release against which that lock was verified.
+
+When RuneLite publishes a new release:
+
+```sh
+cd plugin
+./gradlew dependencies --write-locks
+./gradlew clean test
+cd ..
+```
+
+Review the lock diff and update `candidate.verifiedRuneLiteRelease` in
+`plugin/release-manifest.json` in the same commit. Never edit the lock by hand.
+
+## Before extracting a candidate
+
+Run from the monorepo root:
 
 ```sh
 npm run ci:check
 npm run plugin:release-plan
-./scripts/extract-plugin.sh ~/code/scapestack-runelite-plugin
-cd ~/code/scapestack-runelite-plugin
-git add -A
-git commit -m "Release v0.2.0"
-git tag v0.2.0
-git push --tags origin main
+./scripts/extract-plugin.sh ~/code/scapestack-runelite-plugin --dry-run
 ```
 
-After pushing the standalone repo, copy the new full commit SHA and update
-`runelite/plugin-hub` file `plugins/scapestack-sync`:
+The offline release check proves candidate version parity, contract ownership,
+opt-in defaults, dependency locking and the standalone file surface. The plan
+also lists local release-impact files so `.repo-git` worktrees cannot silently
+look clean.
+
+Plugin version ownership is intentionally not tied to the web app's
+`package.json` version. Candidate plugin state comes from:
+
+- `plugin/release-manifest.json` - semantic version, contract versions and
+  verified RuneLite release;
+- `src/lib/plugin-sync.ts` - exposes the candidate for release checks and the
+  published version for player-facing update checks;
+- `plugin/build.gradle` - imports the candidate version and RuneLite selector;
+- `plugin/runelite-plugin.properties` - candidate Plugin Hub metadata;
+- `ScapestackSyncPlugin.PLUGIN_VERSION` - candidate payload and user-agent
+  version;
+- `plugin/gradle.lockfile` - exact resolved build dependencies.
+
+`tests/plugin-version-drift.test.ts` and `npm run plugin:release-check` fail when
+those sources drift.
+
+## Extract, test and push the standalone candidate
+
+Only continue after the candidate contract is release-ready:
+
+```sh
+./scripts/extract-plugin.sh ~/code/scapestack-runelite-plugin
+cd ~/code/scapestack-runelite-plugin
+./gradlew clean test
+git status --short
+git add -A
+git commit -m "Release v0.3.0"
+git push origin main
+git rev-parse HEAD
+```
+
+Do not tag or submit a commit that has not passed the standalone Gradle test.
+Copy the full 40-character SHA printed by `git rev-parse HEAD`.
+
+The extract script mirrors `plugin/`, copies the license and generates the
+standalone README. It never deletes the monorepo source. Use `--clean` only when
+you intentionally want a fresh target tree.
+
+## Update Plugin Hub
+
+In a fork of `runelite/plugin-hub`, update
+`plugins/scapestack-sync` to the tested standalone commit:
 
 ```text
 repository=https://github.com/laurensbs/scapestack-runelite-plugin.git
-commit=<new full sha from the standalone repo>
+commit=<full tested standalone SHA>
 ```
 
-This is the critical handoff: RuneLite reviewers only inspect the commit pinned
-in Plugin Hub. Local monorepo improvements do not affect review until they are
-extracted, committed, pushed, and the Plugin Hub PR pin is updated.
+Open a new update PR. The PR body must describe the candidate that is actually
+pinned. It must state:
 
-Before asking maintainers to re-review, run:
+- **External HTTP calls without user opt-in:** `Sync on login` and `Refresh
+  after quests` default off. Manual sync is an explicit player action.
+- **Bank privacy:** when bank sync is enabled, Scapestack sends bank item names,
+  IDs and quantities for gear and supply planning. It never sends inventory,
+  equipment, chat, screenshots, clicks, local files, login details or a
+  RuneScape password.
+- **Transport:** claim and sync use the raw install token only as the
+  Authorization bearer. The server stores its hash.
+- **Threading:** collection and HTTP work do not block RuneLite's client thread.
+- **Web handoff:** successful sync opens
+  `/next?rsn=...&source=plugin-sync&bank=none`; the website loads the persisted
+  plugin snapshot instead of reusing stale browser bank context.
+
+Local monorepo improvements do not affect Plugin Hub review until they are
+extracted, committed, pushed and pinned in that file.
+
+## Record publication truth
+
+After Plugin Hub master contains the new commit:
+
+1. Update `published.version`, `published.contractVersion` and
+   `published.sourceCommit` in `plugin/release-manifest.json`.
+2. Confirm the candidate values still describe the next supported artifact.
+3. Run:
 
 ```sh
-npm run plugin:review-packet
-npm run plugin:review-reply-command
-npm run plugin:review-handoff-command
+npm run plugin:release-check
+npm run plugin:release-check:live
+npm run plugin:release-evidence
 ```
 
-Paste that packet into the Plugin Hub PR body or run the reply command from an
-authenticated GitHub CLI checkout to add it as a maintainer reply. The handoff
-command prints the full GitHub CLI sequence that rewrites the stale PR body and
-adds the reviewer packet comment in one pass. It keeps the review text aligned
-with the actual plugin: sync defaults are off, posted data is limited to opt-in
-game-state, HTTP runs off the RuneLite client thread, and the raw token is only sent as the Authorization bearer for claim and sync requests. Replace stale PR-body copy
-if it still says sync-on-login defaults on or implies the raw token never leaves the client.
+`plugin:release-check:live` reads the actual Plugin Hub master entry, the pinned
+standalone artifact, standalone `main` and official RuneLite Maven metadata. A
+historical PR being closed, merged, stale or unavailable is informational and
+cannot create a false release failure.
 
-Also keep the web-app merge contract visible in the PR body: successful sync
-opens `/next?rsn=...&source=plugin-sync&bank=none`, where `source=plugin-sync`
-loads the verified account-progress payload and `bank=none` prevents stale
-browser bank context from being silently reused. Gear-aware advice still comes
-from a separate browser-only Bank Memory or Bank Tags paste.
+`plugin:release-evidence` prints JSON containing the monorepo commit, candidate
+contract, declared published artifact, observed Plugin Hub pin, standalone head
+and dependency release. Save it with the release handoff.
 
-The extract script:
-- Mirrors `plugin/` to the target directory (preserves Git history
-  for files that share names — use `--clean` to start fresh).
-- Copies `LICENSE` from the monorepo if present.
-- Generates a top-level README pointing back here.
-- Does NOT delete the original `plugin/` tree — the monorepo stays
-  authoritative for ongoing development.
+The live gate fails when:
 
-## Hub submission
+- Plugin Hub master points at another repository or commit;
+- the pinned artifact version differs from the declared published version;
+- standalone `main` contains an untracked version;
+- the official RuneLite release no longer matches the committed lock.
 
-Once the standalone repo has a tagged release:
-
-1. Fork [runelite/plugin-hub](https://github.com/runelite/plugin-hub).
-2. Add a new file `plugins/scapestack-sync` containing:
-   ```
-   repository=https://github.com/laurensbs/scapestack-runelite-plugin.git
-   commit=<full sha of the tagged release>
-   ```
-3. Open a PR. CI runs `./gradlew build` against the pinned commit; if
-   it goes green, a RuneLite maintainer reviews the code.
-4. Review can take 2–6 weeks. Common reasons for rejection:
-   - **External HTTP calls without user opt-in.** `Sync on login`
-     and `Refresh after quests` both default off. The player must enable
-     them in RuneLite settings before any progress POST happens. Document
-     this in the PR body.
-   - **PII/data leakage.** We POST RSN, plugin version, quest/diary state,
-     loaded collection-log item IDs, Slayer state, and the local claim token.
-     We do not collect a RuneScape password, bank/inventory/equipment, chat,
-     inputs, screenshots, local files, IP, or machine fingerprint. Call this
-     out in the PR body.
-   - **Ambiguous web handoff.** State that plugin sync opens a bankless
-     `/next` URL with `source=plugin-sync&bank=none`; bank context is a
-     separate browser-only paste and never flows through RuneLite.
-   - **Long-running work on the client thread.** Our sync runs on a named
-     daemon background thread, and plugin shutdown cancels the active OkHttp
-     call and suppresses further chat feedback while that worker returns
-     normally. Verify before submitting.
-5. Once merged, the plugin appears in the in-game Plugin Hub within
-   ~30 min (CI rebuild cadence).
-
-## Verifying before submission
-
-- `npm run ci:check` green from the monorepo root
-- `npm run plugin:release-plan` reviewed
-- `./gradlew build` clean
-- `./gradlew test` all green
-- Plugin loads in `./gradlew runClient` without errors in the log
-- Triggering a sync against a local backend returns 200 (claim + sync
-  both succeed; no `403 Token does not match` after the first run)
-- Switching characters on the same install re-claims cleanly (the
-  plugin clears `claimedRsn` and re-POSTs `/api/sync/claim`)
-
-## Versioning
-
-Plugin version must stay identical across:
-
-- `package.json` (`version`) — web app release version
-- `src/lib/plugin-sync.ts` (`CURRENT_PLUGIN_VERSION`) — web checker expectation
-- `plugin/build.gradle` (`version = '...'`) — RuneLite build metadata
-- `plugin/runelite-plugin.properties` (`version=...`) — Plugin Hub manifest
-- `ScapestackSyncPlugin.PLUGIN_VERSION` — payload/chat/user-agent version
-
-Run `npm test -- tests/plugin-version-drift.test.ts` before every release.
-That test intentionally fails if any of those values drift.
+An intentional candidate ahead of the published artifact is reported separately
+and is not confused with production drift.

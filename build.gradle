@@ -15,6 +15,8 @@ plugins {
     id 'java'
 }
 
+import groovy.json.JsonSlurper
+
 repositories {
     mavenLocal()
     mavenCentral()
@@ -23,7 +25,9 @@ repositories {
     }
 }
 
-def runeLiteVersion = 'latest.release'
+def releaseManifest = new JsonSlurper().parse(file('release-manifest.json'))
+def candidateRelease = releaseManifest.candidate
+def runeLiteVersion = candidateRelease.runeLiteDependency
 
 // 'runClient' needs the RuneLite client + its transitive deps on a
 // real (non-test) runtime classpath. The main compileOnly dep keeps
@@ -50,7 +54,14 @@ dependencies {
 }
 
 group = 'app.scapestack.runelite'
-version = '0.2.0'
+version = candidateRelease.version
+
+// RuneLite's official Plugin Hub template intentionally tracks
+// `latest.release`. Locking records the exact release tested by Scapestack so
+// local/release builds stay reproducible until the lock is updated explicitly.
+dependencyLocking {
+    lockAllConfigurations()
+}
 
 java {
     sourceCompatibility = JavaVersion.VERSION_11
@@ -89,6 +100,13 @@ task runClient(type: JavaExec) {
     // ExternalPluginManager.loadBuiltin verifieert dat -ea aan staat:
     // pakt API-misbruik tijdens dev vroeger.
     jvmArgs '-ea'
+    // Gradle itself needs a JDK, while RuneLite's macOS app ships a JRE that
+    // matches the launcher runtime. Allow the dev client to use that runtime
+    // without forcing compileJava onto a JRE with no javac:
+    //   ./gradlew runClient -PruneliteJava=/Applications/RuneLite.app/Contents/Resources/jre/bin/java
+    if (project.hasProperty('runeliteJava')) {
+        executable = project.property('runeliteJava')
+    }
     systemProperty 'runelite.pluginhub.version', project.version
 }
 
@@ -116,4 +134,13 @@ test {
         showStandardStreams = false
         exceptionFormat = 'short'
     }
+}
+
+tasks.register('writeSyncContractFixture', JavaExec) {
+    group = 'verification'
+    description = 'Regenerate the v3 plugin sync fixture through the production serializer'
+    dependsOn 'testClasses'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'app.scapestack.runelite.SyncPayloadFixtureWriter'
+    args = [file('../tests/fixtures/plugin-sync-v3.json').absolutePath]
 }

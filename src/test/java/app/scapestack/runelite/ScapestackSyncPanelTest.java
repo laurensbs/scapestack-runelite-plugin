@@ -22,16 +22,18 @@ public class ScapestackSyncPanelTest {
         assertTrue(source.contains("Keeps your OSRS planner current from RuneLite."));
         assertTrue(source.contains("Sync now"));
         assertTrue(source.contains("Account mode"));
-        assertTrue(source.contains("Last sync"));
-        assertTrue(source.contains("Auto refresh"));
+        assertTrue(source.contains("Last update"));
+        assertTrue(source.contains("Auto update"));
         assertTrue(source.contains("Next action"));
         assertTrue(source.contains("Use recommended sync"));
-        assertTrue(source.contains("Planner checks"));
-        assertTrue(source.contains("Skills, quests, diaries, Slayer task and bank readiness"));
-        assertTrue(source.contains("Recommended sync refreshes after login and then every 15 minutes while you play"));
-        assertTrue(source.contains("Turn bank checks off if you only want progress sync"));
+        assertTrue(source.contains("Planner fuel"));
+        assertTrue(source.contains("Skills, XP, quests, diaries, boss KC RuneLite has seen, Slayer task and bank items"));
+        assertTrue(source.contains("Auto update refreshes after login and then every 15 minutes while you play"));
+        assertTrue(source.contains("Turn bank off if you only want finished-progress checks"));
         assertTrue(source.contains("Collection Log"));
         assertTrue(source.contains("Troubleshooting"));
+        assertTrue(source.contains("Connect this browser"));
+        assertTrue(source.contains("Get a code on Scapestack"));
         assertTrue(source.contains("shouldShowCollectionLogInstruction"));
 
         String lower = source.toLowerCase();

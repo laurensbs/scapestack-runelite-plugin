@@ -12,12 +12,19 @@ import net.runelite.api.Skill;
 import net.runelite.api.vars.AccountType;
 import net.runelite.api.widgets.Widget;
 import net.runelite.api.widgets.WidgetInfo;
+import net.runelite.api.gameval.DBTableID;
+import net.runelite.api.gameval.VarPlayerID;
+import net.runelite.api.gameval.VarbitID;
+import net.runelite.client.config.ConfigManager;
 
+import javax.inject.Inject;
 import javax.inject.Singleton;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Reads quest/diary/CL state out of the live game client.
@@ -40,7 +47,11 @@ import java.util.List;
 @Singleton
 public class GameStateReader {
 
+    @Inject
+    private ConfigManager configManager;
+
     public static class Snapshot {
+        public String capturedAt = Instant.now().toString();
         public List<String> questsCompleted = new ArrayList<>();
         public List<SkillLevel> skills = new ArrayList<>();
         public List<DiaryCompletion> diariesCompleted = new ArrayList<>();
@@ -49,7 +60,10 @@ public class GameStateReader {
         public List<BankItem> bankItems = new ArrayList<>();
         public BankStatus bankStatus = BankStatus.optInOff();
         public SlayerState slayer = null;
+        public Map<String, Integer> bossKc = null;
+        BossKillCountReader.Result bossKcStatus = null;
         public String accountType = "normal";
+        public Map<String, PluginSnapshotContract.Domain> coverage = new LinkedHashMap<>();
     }
 
     public static class BankItem {
@@ -94,28 +108,51 @@ public class GameStateReader {
     public static class SkillLevel {
         public final String name;
         public final int level;
+        public final int xp;
         public SkillLevel(String name, int level) {
+            this(name, level, 0);
+        }
+        public SkillLevel(String name, int level, int xp) {
             this.name = name;
             this.level = level;
+            this.xp = xp;
         }
     }
 
     /** Slayer-state read uit VarPlayers. Null wanneer geen sessie of
      *  varp-leesfout — server-side leeg veld = "geen plugin slayer data". */
     public static class SlayerState {
-        public final int points;             // varp 1170
-        public final int streak;             // varp 1602
-        public final int taskRemaining;      // varp 395  (huidige task quantity remaining)
-        public final int currentTaskId;      // varp 394  (welke monster is current task)
+        public final int points;
+        public final int streak;
+        public final int taskRemaining;
+        public final int currentTaskId;
+        public final String taskName;
+        public final String taskLocation;
         /** Block-slot task-IDs uit varps 1306..1311. 0 = leeg slot.
          *  Server-side mappen we naar monster.id via een task-id tabel. */
         public final List<Integer> blocks;
+        public final List<String> blockNames;
         public SlayerState(int points, int streak, int taskRemaining, int currentTaskId, List<Integer> blocks) {
+            this(points, streak, taskRemaining, currentTaskId, null, null, blocks, Collections.emptyList());
+        }
+        public SlayerState(
+            int points,
+            int streak,
+            int taskRemaining,
+            int currentTaskId,
+            String taskName,
+            String taskLocation,
+            List<Integer> blocks,
+            List<String> blockNames
+        ) {
             this.points = points;
             this.streak = streak;
             this.taskRemaining = taskRemaining;
             this.currentTaskId = currentTaskId;
+            this.taskName = taskName;
+            this.taskLocation = taskLocation;
             this.blocks = blocks;
+            this.blockNames = blockNames;
         }
     }
 
@@ -134,7 +171,9 @@ public class GameStateReader {
         s.skills = readSkills(client);
         s.diariesCompleted = readDiaries(client);
         s.collectionLogItemIds = readCollectionLog(client);
+        readBossKillCounts(s);
         s.accountType = readAccountType(client);
+        s.coverage = PluginSnapshotContract.observedCoverage(s);
         return s;
     }
 
@@ -239,8 +278,18 @@ public class GameStateReader {
         s.bankItems = bank.items;
         s.bankStatus = bank.status;
         s.slayer = readSlayer(client);
+        readBossKillCounts(s);
         s.accountType = readAccountType(client);
+        s.coverage = PluginSnapshotContract.observedCoverage(s);
         return s;
+    }
+
+    private void readBossKillCounts(Snapshot snapshot) {
+        BossKillCountReader.Result result = BossKillCountReader.read(configManager, snapshot.capturedAt);
+        snapshot.bossKcStatus = result;
+        snapshot.bossKc = result.isAvailable()
+            ? new LinkedHashMap<>(result.counts)
+            : null;
     }
 
     private List<SkillLevel> readSkills(Client client) {
@@ -248,7 +297,11 @@ public class GameStateReader {
         for (Skill skill : Skill.values()) {
             if (skill == Skill.OVERALL) continue;
             try {
-                out.add(new SkillLevel(skill.getName(), client.getRealSkillLevel(skill)));
+                out.add(new SkillLevel(
+                    skill.getName(),
+                    client.getRealSkillLevel(skill),
+                    Math.max(0, client.getSkillExperience(skill))
+                ));
             } catch (Exception ex) {
                 log.debug("Skill level read failed for {}", skill, ex);
             }
@@ -274,14 +327,14 @@ public class GameStateReader {
                 items.add(new BankItem(item.getId(), name, item.getQuantity()));
                 if (items.size() >= 1200) break;
             }
-            String capturedAt = items.isEmpty() ? null : Instant.now().toString();
+            String capturedAt = Instant.now().toString();
             return new BankSnapshot(
                 items,
                 new BankStatus(
                     true,
                     items.size(),
                     capturedAt,
-                    items.isEmpty() ? "no-items-captured" : null
+                    null
                 )
             );
         } catch (Exception ex) {
@@ -321,32 +374,105 @@ public class GameStateReader {
         }
     }
 
-    /** Slayer points + streak + current-task remaining + 6 block-slot
-     *  task-IDs vanuit VarPlayers. Varp-IDs gepind hier zodat de plugin
-     *  test-baar blijft zonder live client. Bron: OSRS Wiki VarPlayer
-     *  + Reward Shop pagina.
-     *
-     *  Block-slot varps: 1306..1311. Lege slot = 0. */
+    /** Slayer points, streak, current task and six block slots. Task identity
+     *  is resolved through the same game DB tables RuneLite uses; the raw
+     *  target value is retained only for backwards compatibility. */
     private static final int[] BLOCK_SLOT_VARPS = { 1306, 1307, 1308, 1309, 1310, 1311 };
 
     private SlayerState readSlayer(Client client) {
         try {
-            int points = client.getVarpValue(1170);
-            int streak = client.getVarpValue(1602);
-            int remaining = client.getVarpValue(395);
-            int taskId = client.getVarpValue(394);
+            int points = client.getVarbitValue(VarbitID.SLAYER_POINTS);
+            int streak = client.getVarbitValue(VarbitID.SLAYER_TASKS_COMPLETED);
+            int remaining = client.getVarpValue(VarPlayerID.SLAYER_COUNT);
+            int taskId = client.getVarpValue(VarPlayerID.SLAYER_TARGET);
+            String taskName = remaining > 0 ? resolveSlayerTaskName(client, taskId) : null;
+            String taskLocation = remaining > 0 ? resolveSlayerTaskLocation(client) : null;
             ArrayList<Integer> blocks = new ArrayList<>(BLOCK_SLOT_VARPS.length);
+            ArrayList<String> blockNames = new ArrayList<>(BLOCK_SLOT_VARPS.length);
             for (int v : BLOCK_SLOT_VARPS) {
                 int id = client.getVarpValue(v);
-                if (id > 0) blocks.add(id);
+                if (id > 0) {
+                    blocks.add(id);
+                    String blockName = resolveSlayerTaskName(client, id);
+                    if (blockName != null && !blockName.isBlank()) blockNames.add(blockName);
+                }
             }
-            // Geen sessie / niet ingelogd → alle vars 0. Treat als "no data."
-            if (points == 0 && streak == 0 && remaining == 0 && taskId == 0 && blocks.isEmpty()) {
-                return null;
-            }
-            return new SlayerState(points, streak, remaining, taskId, blocks);
+            return new SlayerState(
+                points,
+                streak,
+                remaining,
+                taskId,
+                taskName,
+                taskLocation,
+                blocks,
+                blockNames
+            );
         } catch (Exception ex) {
             log.debug("Slayer state read faalde — verm. geen sessie", ex);
+            return null;
+        }
+    }
+
+    private String resolveSlayerTaskName(Client client, int taskId) {
+        if (taskId <= 0) return null;
+        try {
+            int taskRow;
+            if (taskId == 98) {
+                List<Integer> bossRows = client.getDBRowsByValue(
+                    DBTableID.SlayerTaskSublist.ID,
+                    DBTableID.SlayerTaskSublist.COL_TASK_SUBTABLE_ID,
+                    0,
+                    client.getVarbitValue(VarbitID.SLAYER_TARGET_BOSSID)
+                );
+                if (bossRows.isEmpty()) return null;
+                Object[] taskFields = client.getDBTableField(
+                    bossRows.get(0),
+                    DBTableID.SlayerTaskSublist.COL_TASK,
+                    0
+                );
+                if (taskFields.length == 0 || !(taskFields[0] instanceof Integer)) return null;
+                taskRow = (Integer) taskFields[0];
+            } else {
+                List<Integer> taskRows = client.getDBRowsByValue(
+                    DBTableID.SlayerTask.ID,
+                    DBTableID.SlayerTask.COL_ID,
+                    0,
+                    taskId
+                );
+                if (taskRows.isEmpty()) return null;
+                taskRow = taskRows.get(0);
+            }
+            Object[] names = client.getDBTableField(taskRow, DBTableID.SlayerTask.COL_NAME_UPPERCASE, 0);
+            if (names.length == 0 || !(names[0] instanceof String)) return null;
+            String name = ((String) names[0]).trim();
+            return name.isEmpty() ? null : name;
+        } catch (Exception ex) {
+            log.debug("Slayer task name lookup failed for {}", taskId, ex);
+            return null;
+        }
+    }
+
+    private String resolveSlayerTaskLocation(Client client) {
+        try {
+            int areaId = client.getVarpValue(VarPlayerID.SLAYER_AREA);
+            if (areaId <= 0) return null;
+            List<Integer> areaRows = client.getDBRowsByValue(
+                DBTableID.SlayerArea.ID,
+                DBTableID.SlayerArea.COL_AREA_ID,
+                0,
+                areaId
+            );
+            if (areaRows.isEmpty()) return null;
+            Object[] names = client.getDBTableField(
+                areaRows.get(0),
+                DBTableID.SlayerArea.COL_AREA_NAME_IN_HELPER,
+                0
+            );
+            if (names.length == 0 || !(names[0] instanceof String)) return null;
+            String name = ((String) names[0]).trim();
+            return name.isEmpty() ? null : name;
+        } catch (Exception ex) {
+            log.debug("Slayer task location lookup failed", ex);
             return null;
         }
     }

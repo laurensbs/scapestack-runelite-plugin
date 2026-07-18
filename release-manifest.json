@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "pluginId": "scapestack-sync",
+  "repository": "https://github.com/laurensbs/scapestack-runelite-plugin.git",
+  "standaloneBranch": "main",
+  "pluginHubManifestPath": "plugins/scapestack-sync",
+  "reviewPullRequest": 12536,
+  "candidate": {
+    "version": "0.3.0",
+    "contractVersion": 3,
+    "minimumWebsiteContractVersion": 3,
+    "runeLiteDependency": "latest.release",
+    "verifiedRuneLiteRelease": "1.12.33"
+  },
+  "published": {
+    "version": "0.2.0",
+    "contractVersion": 2,
+    "sourceCommit": "dafcfb495aa1221a273e6f0e03d6aff5f2f41b92"
+  }
+}

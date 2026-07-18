@@ -10,6 +10,10 @@ import okio.Timeout;
 import org.junit.Test;
 
 import java.io.IOException;
+import java.io.Reader;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
@@ -28,8 +32,8 @@ public class ScapestackSyncPluginTest {
         GameStateReader.Snapshot snapshot = new GameStateReader.Snapshot();
         snapshot.questsCompleted = Arrays.asList("Cook's Assistant", "Dragon Slayer I");
         snapshot.skills = Arrays.asList(
-            new GameStateReader.SkillLevel("Agility", 35),
-            new GameStateReader.SkillLevel("Ranged", 70)
+            new GameStateReader.SkillLevel("Agility", 35, 22406),
+            new GameStateReader.SkillLevel("Ranged", 70, 737627)
         );
         snapshot.diariesCompleted = Collections.singletonList(
             new GameStateReader.DiaryCompletion("Karamja", "Easy")
@@ -45,8 +49,12 @@ public class ScapestackSyncPluginTest {
             51,
             47,
             19,
-            Arrays.asList(1, 2)
+            "Dust devils",
+            "Catacombs of Kourend",
+            Arrays.asList(1, 2),
+            Arrays.asList("Banshees", "Black demons")
         );
+        snapshot.bossKc = Collections.singletonMap("Vorkath", 48);
 
         JsonObject payload = ScapestackSyncPlugin.buildSyncPayload("Lynx Titan", snapshot, new Gson());
         Set<String> fields = payload.keySet();
@@ -55,12 +63,16 @@ public class ScapestackSyncPluginTest {
             "rsn",
             "displayName",
             "pluginVersion",
+            "contractVersion",
+            "capturedAt",
+            "coverage",
             "accountType",
             "skills",
             "questsCompleted",
             "diariesCompleted",
             "collectionLogItemIds",
             "collectionLogStatus",
+            "bossKc",
             "bankStatus",
             "bankItems",
             "slayer"
@@ -81,12 +93,19 @@ public class ScapestackSyncPluginTest {
             "streak",
             "taskRemaining",
             "currentTaskId",
-            "blocks"
+            "taskName",
+            "taskLocation",
+            "blocks",
+            "blockNames"
         )), slayer.keySet());
+        assertEquals("Dust devils", slayer.get("taskName").getAsString());
+        assertEquals("Catacombs of Kourend", slayer.get("taskLocation").getAsString());
+        assertEquals("Banshees", slayer.getAsJsonArray("blockNames").get(0).getAsString());
         assertEquals("normal", payload.get("accountType").getAsString());
         assertEquals(2, payload.getAsJsonArray("skills").size());
         assertEquals("Agility", payload.getAsJsonArray("skills").get(0).getAsJsonObject().get("name").getAsString());
         assertEquals(35, payload.getAsJsonArray("skills").get(0).getAsJsonObject().get("level").getAsInt());
+        assertEquals(22406, payload.getAsJsonArray("skills").get(0).getAsJsonObject().get("xp").getAsInt());
         assertEquals(2, payload.getAsJsonArray("bankItems").size());
         assertEquals(1511, payload.getAsJsonArray("bankItems").get(0).getAsJsonObject().get("id").getAsInt());
         assertEquals(6, payload.getAsJsonArray("bankItems").get(0).getAsJsonObject().get("quantity").getAsInt());
@@ -97,6 +116,26 @@ public class ScapestackSyncPluginTest {
         assertEquals(3, collectionLogStatus.get("obtainedItemCount").getAsInt());
         assertTrue(payload.getAsJsonObject("bankStatus").get("enabled").getAsBoolean());
         assertEquals(2, payload.getAsJsonObject("bankStatus").get("itemCount").getAsInt());
+        assertEquals(3, payload.get("contractVersion").getAsInt());
+        assertEquals(48, payload.getAsJsonObject("bossKc").get("Vorkath").getAsInt());
+        assertEquals("available", payload.getAsJsonObject("coverage").getAsJsonObject("bossKc").get("state").getAsString());
+        assertEquals("available", payload.getAsJsonObject("coverage").getAsJsonObject("skills").get("state").getAsString());
+    }
+
+    @Test
+    public void committedV3FixtureMatchesProductionSerializer() throws Exception {
+        Path fixture = Paths.get("..", "tests", "fixtures", "plugin-sync-v3.json");
+        if (!Files.isRegularFile(fixture)) {
+            fixture = Paths.get("src", "test", "resources", "fixtures", "plugin-sync-v3.json");
+        }
+
+        try (Reader reader = Files.newBufferedReader(
+            fixture,
+            java.nio.charset.StandardCharsets.UTF_8
+        )) {
+            JsonObject committed = new Gson().fromJson(reader, JsonObject.class);
+            assertEquals(SyncPayloadFixtureWriter.fixturePayload(), committed);
+        }
     }
 
     @Test
@@ -107,6 +146,23 @@ public class ScapestackSyncPluginTest {
         JsonObject payload = ScapestackSyncPlugin.buildSyncPayload("Uim Lynx", snapshot, new Gson());
 
         assertEquals("ultimate_ironman", payload.get("accountType").getAsString());
+    }
+
+    @Test
+    public void syncPayloadKeepsUnobservedBossKcUnknown() {
+        GameStateReader.Snapshot snapshot = new GameStateReader.Snapshot();
+        snapshot.bossKcStatus = BossKillCountReader.Result.notLoaded(
+            BossKillCountReader.defaultBossCatalog().size(),
+            "boss-kill-log-not-observed"
+        );
+
+        JsonObject payload = ScapestackSyncPlugin.buildSyncPayload("Lynx Titan", snapshot, new Gson());
+        JsonObject coverage = payload.getAsJsonObject("coverage").getAsJsonObject("bossKc");
+
+        assertFalse(payload.has("bossKc"));
+        assertEquals("not-loaded", coverage.get("state").getAsString());
+        assertEquals("boss-kill-log-not-observed", coverage.get("reason").getAsString());
+        assertFalse(coverage.has("capturedAt"));
     }
 
     @Test
