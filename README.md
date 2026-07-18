@@ -1,10 +1,10 @@
 # Scapestack Sync (RuneLite plugin)
 
-Syncs your OSRS quest, diary, collection-log, and Slayer state to
-[scapestack.org](https://www.scapestack.org) after you opt in via
-`Sync on login`, so Path-to-Max can label quest, diary, collection-log
-and Slayer coverage from a verified RuneLite payload instead of only
-hiscores heuristics.
+Syncs your OSRS account mode, skills and XP, quests, diaries,
+observed boss kill counts, collection log, Slayer state and optional bank context to
+[scapestack.org](https://www.scapestack.org). Use `Sync now` for a manual
+refresh or opt in to `Sync on login` for automatic snapshots, so the session
+planner can use RuneLite state instead of guessing from Hiscores alone.
 
 The plugin does not POST progress by default. Enable `Sync on login`
 in RuneLite settings to send login snapshots. Bank readiness is included by default
@@ -26,14 +26,17 @@ the log was not opened, opened without item slots, or loaded correctly.
 
 ## Data contract
 
-Sent after opt-in: RSN, plugin version, quest and diary completion,
-loaded collection-log item IDs, Slayer state, bank item IDs/names/quantities
-when bank checks are on, and the local install token only as the Authorization
-bearer on claim/sync requests.
+Sent after a manual sync or automatic-sync opt-in: RSN, account type, plugin
+and contract version, skill levels and XP, quest and diary completion, observed
+boss kill counts, loaded collection-log item IDs, Slayer state,
+bank item IDs/names/quantities when bank checks are on, and the local install token
+only as the Authorization bearer on claim/sync requests.
 
 Never sent: RuneScape password, inventory, equipment, GE offers, chat,
 friends list, clicks, key presses, screenshots, local files, or RuneLite
-config folders, IP address, or machine fingerprint.
+config folders or a machine fingerprint. The JSON payload does not contain an
+IP address; as with any HTTPS request, the destination server receives the
+connection IP as transport metadata.
 
 The server stores `sha256(token) → RSN` first-wins. The raw token stays
 local except for HTTPS claim and sync requests where it is sent as
